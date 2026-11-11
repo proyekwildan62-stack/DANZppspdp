@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V6 Clean Edition
+name: Build DANZSTRAIGHT V6.1 Clean Edition
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,10 +19,18 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build APK with Shizuku Binder & In-Game Service
+      - name: Build APK with Shizuku Binder & AndroidX Fix
         run: |
+          rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
           mkdir -p clean_apk/app/src/main/assets
+
+          # WAJIB: Mengaktifkan AndroidX agar library Shizuku tidak error saat build
+          cat << 'EOF' > clean_apk/gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.enableJetifier=true
+          EOF
 
           cat << 'EOF' > clean_apk/settings.gradle
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
@@ -39,9 +47,9 @@ jobs:
             defaultConfig { 
               applicationId "com.danzstraight.mod"
               minSdk 24
-              targetSdk 34
-              versionCode 60
-              versionName "6.0"
+              targetSdk 33
+              versionCode 61
+              versionName "6.1"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -93,7 +101,6 @@ jobs:
           </manifest>
           EOF
 
-          # Service Penjaga Proses Selama Bermain Free Fire
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/InGameService.java
           package com.danzstraight.mod;
           import android.app.Notification;
@@ -131,7 +138,6 @@ jobs:
           }
           EOF
 
-          # MainActivity: Eksekutor Shizuku ADB Shell
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -211,7 +217,7 @@ jobs:
                       }
                       Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                       m.setAccessible(true);
-                      Process p = (Process) m.invoke(null, new String[]{"sh"}, null, null);
+                      java.lang.Process p = (java.lang.Process) m.invoke(null, new String[]{"sh"}, null, null);
                       OutputStream os = p.getOutputStream();
                       os.write((commands + "\nexit\n").getBytes());
                       os.flush();
@@ -274,7 +280,7 @@ jobs:
                   public String runFeature(int id, String name, boolean on, int sensi, int lightMode) {
                       StringBuilder cmd = new StringBuilder();
 
-                      if (id == 1) { // Aim Merah / Drag HS
+                      if (id == 1) { // Aim Merah (Drag HS)
                           if (on) {
                               cmd.append("settings put system pointer_speed 7\n");
                               cmd.append("settings put secure long_press_timeout 120\n");
@@ -307,7 +313,7 @@ jobs:
                               cmd.append("settings put global transition_animation_scale 1.0\n");
                               cmd.append("settings put global animator_duration_scale 1.0\n");
                           }
-                      } else if (id == 4) { // Aim Legit & Stabilizer
+                      } else if (id == 4) { // Aim Legit
                           if (on) {
                               cmd.append("settings put system pointer_speed 5\n");
                               cmd.append("settings put secure tap_duration_threshold 0.0\n");
@@ -324,7 +330,7 @@ jobs:
                               cmd.append("settings put system pointer_speed 0\n");
                               cmd.append("wm density reset\n");
                           }
-                      } else if (id == 6) { // Boost Performa & Kunci FPS
+                      } else if (id == 6) { // Boost HP & Kunci FPS
                           if (on) {
                               cmd.append("cmd game mode performance com.dts.freefireth\n");
                               cmd.append("cmd game mode performance com.dts.freefiremax\n");
@@ -334,10 +340,9 @@ jobs:
                           } else {
                               cmd.append("settings put system min_refresh_rate 60.0\n");
                           }
-                      } else if (id == 7) { // GRAFIK RINGAN (Pengganti Graphic MC)
+                      } else if (id == 7) { // Grafik Ringan (2 Mode)
                           if (on) {
                               if (lightMode == 1) {
-                                  // Mode 1: Super Ringan (Low Poly / Tekstur Halus seperti di Foto)
                                   cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=0.35:mode=3,downscaleFactor=0.35\n");
                                   cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=0.35:mode=3,downscaleFactor=0.35\n");
                                   cmd.append("cmd game set --mode 2 --downscale 0.35 com.dts.freefireth\n");
@@ -345,7 +350,6 @@ jobs:
                                   cmd.append("wm size 540x1200\n");
                                   cmd.append("setprop debug.hwui.renderer skiagl\n");
                               } else {
-                                  // Mode 2: Burik PC (Layar Lebar / Stretched Emulator)
                                   cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=0.5:mode=3,downscaleFactor=0.5\n");
                                   cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=0.5:mode=3,downscaleFactor=0.5\n");
                                   cmd.append("cmd game set --mode 2 --downscale 0.5 com.dts.freefireth\n");
@@ -415,7 +419,6 @@ jobs:
           }
           EOF
 
-          # Antarmuka Clean Dark Android Native (Tanpa Emoji, Tanpa Gaya AI)
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -437,7 +440,6 @@ jobs:
             body { background: var(--bg); color: var(--text); padding: 14px; padding-bottom: 80px; }
             .hidden { display: none !important; }
 
-            /* LAYAR MASUK (SHIZUKU & KEY) */
             .login-wrap { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
             .login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
             .app-name { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
@@ -451,17 +453,14 @@ jobs:
             .input-field { width: 100%; background: #141619; border: 1px solid var(--border); border-radius: 6px; color: #fff; padding: 11px; font-size: 13px; margin-bottom: 12px; outline: none; }
             .input-field:focus { border-color: var(--accent); }
 
-            /* HEADER */
             .top-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
             .btn-small { background: #262930; color: #EF5350; border: 1px solid #3E2723; padding: 6px 10px; border-radius: 5px; font-size: 11px; font-weight: 600; }
 
-            /* INFO BAR */
             .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
             .info-item { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
             .info-label { font-size: 11px; color: var(--muted); }
             .info-val { font-size: 13px; font-weight: 700; color: var(--active-light); margin-top: 2px; }
 
-            /* LIST FITUR */
             .module-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
             .module-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
             .module-card.active { border-color: var(--active-light); }
@@ -469,7 +468,6 @@ jobs:
             .module-title { font-size: 14px; font-weight: 600; }
             .module-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-            /* SWITCH */
             .switch { position: relative; width: 42px; height: 22px; flex-shrink: 0; }
             .switch input { opacity: 0; width: 0; height: 0; }
             .slider { position: absolute; inset: 0; background: #2E323B; border-radius: 22px; transition: 0.15s; }
@@ -477,20 +475,17 @@ jobs:
             input:checked + .slider { background: var(--active); }
             input:checked + .slider:before { transform: translateX(20px); background: #fff; }
 
-            /* KONTROL TAMBAHAN */
             .sub-control { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
             .step-box { display: flex; align-items: center; gap: 12px; }
             .step-btn { background: #262930; color: #fff; border: 1px solid var(--border); width: 30px; height: 28px; border-radius: 4px; font-weight: 700; }
             .select-box { width: 100%; background: #141619; color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; font-size: 12px; outline: none; }
 
-            /* PANEL DEVELOPER KEY */
             .dev-panel { background: var(--surface); border: 1px solid var(--accent); border-radius: 6px; padding: 12px; margin-bottom: 14px; }
             .dev-header { font-size: 13px; font-weight: 700; color: #EF5350; margin-bottom: 10px; display: flex; justify-content: space-between; }
             .key-row { background: #141619; border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; margin-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
             .tag-btn { background: #262930; color: #fff; border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 10px; margin-left: 4px; }
             .tag-btn.danger { background: #B71C1C; border-color: #D32F2F; }
 
-            /* STATUS BAWAH */
             .status-box { background: #141619; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
             .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 54px; background: var(--surface); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; z-index: 90; }
             .nav-btn { font-size: 12px; color: var(--muted); font-weight: 500; padding: 8px 12px; }
@@ -499,11 +494,10 @@ jobs:
           </head>
           <body>
 
-            <!-- GERBANG AWAL: SHIZUKU & LISENSI 1 KEY 1 DEVICE -->
             <div class="login-wrap" id="login-screen">
               <div class="login-card">
                 <div class="app-name">DANZSTRAIGHT</div>
-                <div class="app-ver">System Tweaker & Shizuku Injector v6.0</div>
+                <div class="app-ver">System Tweaker & Shizuku Injector v6.1</div>
 
                 <div class="section-box">
                   <div class="row-between">
@@ -525,7 +519,6 @@ jobs:
               </div>
             </div>
 
-            <!-- HEADER UTAMA -->
             <div class="top-bar">
               <div>
                 <div class="app-name">DANZSTRAIGHT</div>
@@ -545,7 +538,6 @@ jobs:
               </div>
             </div>
 
-            <!-- PANEL KHUSUS DEVELOPER (CREATE KEY & STOP KEY) -->
             <div class="dev-panel hidden" id="dev-panel">
               <div class="dev-header">
                 <span>Manajemen Lisensi Developer</span>
@@ -559,10 +551,7 @@ jobs:
               <div id="key-list"></div>
             </div>
 
-            <!-- DAFTAR FITUR IN-GAME -->
             <div class="module-list">
-
-              <!-- 1. Aim Merah / Drag HS -->
               <div class="module-card" id="card-1">
                 <div class="module-top">
                   <div>
@@ -573,7 +562,6 @@ jobs:
                 </div>
               </div>
 
-              <!-- 2. Easy Drag -->
               <div class="module-card" id="card-2">
                 <div class="module-top">
                   <div>
@@ -584,7 +572,6 @@ jobs:
                 </div>
               </div>
 
-              <!-- 3. Smooth Aim -->
               <div class="module-card" id="card-3">
                 <div class="module-top">
                   <div>
@@ -595,7 +582,6 @@ jobs:
                 </div>
               </div>
 
-              <!-- 4. Aim Legit -->
               <div class="module-card" id="card-4">
                 <div class="module-top">
                   <div>
@@ -606,7 +592,6 @@ jobs:
                 </div>
               </div>
 
-              <!-- 5. Sensitivitas DPI -->
               <div class="module-card" id="card-5">
                 <div class="module-top">
                   <div>
@@ -625,7 +610,6 @@ jobs:
                 </div>
               </div>
 
-              <!-- 6. Boost Performa -->
               <div class="module-card" id="card-6">
                 <div class="module-top">
                   <div>
@@ -636,7 +620,6 @@ jobs:
                 </div>
               </div>
 
-              <!-- 7. GRAFIK RINGAN (2 Mode) -->
               <div class="module-card" id="card-7">
                 <div class="module-top">
                   <div>
@@ -652,7 +635,6 @@ jobs:
                   </select>
                 </div>
               </div>
-
             </div>
 
             <div class="status-box" id="status-log">Status: Menunggu perintah...</div>
@@ -808,8 +790,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V6 APK
+      - name: Upload DANZSTRAIGHT V6.1 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V6-CLEAN
+          name: DANZSTRAIGHT-V6-1-CLEAN
           path: clean_apk/app/build/outputs/apk/debug/*.apk
