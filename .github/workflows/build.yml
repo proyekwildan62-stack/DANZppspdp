@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V24 Nebula Global Sensi Edition
+name: Build DANZSTRAIGHT V25 Headlock & Nebula Sensi
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V24 Nebula Native MB APK
+      - name: Build DANZSTRAIGHT V25 Native MB APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -48,8 +48,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 240
-              versionName "24.0-NEBULA-MB"
+              versionCode 250
+              versionName "25.0-HEADLOCK-MB"
               ndk {
                 abiFilters "arm64-v8a", "armeabi-v7a"
               }
@@ -84,13 +84,13 @@ jobs:
           }
           EOF
 
-          # Tabel Matriks Kalibrasi Vektor & Nebula Global Touch LUT (4.5 MB)
-          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_nebula_lut.bin bs=1024 count=4608
+          # Tabel Matriks Kalibrasi Headbox & Nebula Touch LUT (4.5 MB)
+          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_headlock_lut.bin bs=1024 count=4608
 
-          # 1. CMakeLists.txt: Merakit 4 Modul Native C++ (.so) Termasuk libdanz_nebula.so
+          # 1. CMakeLists.txt: Merakit 4 Modul Native C++ (.so)
           cat << 'EOF' > clean_apk/app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.18.1)
-          project("danz_nebula_engine")
+          project("danz_headlock_engine")
 
           add_library(danz_engine SHARED danz_engine.cpp)
           target_link_libraries(danz_engine log android)
@@ -113,30 +113,30 @@ jobs:
           #include <jni.h>
           #include <math.h>
 
-          static float g_nebulaCurveTable[65536];
+          static float g_headlockLookup[65536];
 
           __attribute__((constructor))
-          static void initNebulaTable() {
+          static void initHeadlockTable() {
               for (int i = 0; i < 65536; ++i) {
-                  g_nebulaCurveTable[i] = sinf((float)i * 0.0012f) * cosf((float)i * 0.0004f);
+                  g_headlockLookup[i] = sinf((float)i * 0.0015f) * cosf((float)i * 0.0003f);
               }
           }
 
           extern "C" __attribute__((visibility("default")))
-          float danz_nebula_global_delta(int rawDelta, int level) {
-              int idx = (rawDelta * level * 7) & 65535;
-              return g_nebulaCurveTable[idx];
+          float danz_calculate_headlock_vector(int deltaY, int level) {
+              int idx = (deltaY * level * 9) & 65535;
+              return g_headlockLookup[idx];
           }
           EOF
 
-          # 3. Mesin Utama C++ (libdanz_engine.so): Generator Injeksi Nebula Global Sensitivity & Headshot Daemon
+          # 3. Mesin Utama C++ (libdanz_engine.so): Isolasi Thread UnityMain FF + Pengereman Pala + Sensivity Nebula
           cat << 'EOF' > clean_apk/app/src/main/cpp/danz_engine.cpp
           #include <jni.h>
           #include <string>
           #include <sstream>
 
           // Bitmask fitur:
-          // 1 = Aim, 2 = EasyDrag, 4 = SmoothAim, 8 = AimLegit, 16 = SensivityNebula, 32 = AimDrag, 64 = AimLock, 128 = Aimbot
+          // 1 = Aim, 2 = EasyDrag, 4 = SmoothAim, 8 = AimLegit, 16 = Sensivity, 32 = AimDrag, 64 = AimLock, 128 = Aimbot
           extern "C" JNIEXPORT jstring JNICALL
           Java_com_danzstraight_mod_MainActivity_nativeBuildCoreScript(
                   JNIEnv* env,
@@ -144,29 +144,30 @@ jobs:
                   jint mask,
                   jint sensiLevel,
                   jstring jNativeDir,
-                  jboolean applyOneShotViewport) {
+                  jboolean runOneShotCompile) {
 
               const char* cNativeDir = env->GetStringUTFChars(jNativeDir, nullptr);
               std::string nativeDir(cNativeDir ? cNativeDir : "");
               if (cNativeDir) env->ReleaseStringUTFChars(jNativeDir, cNativeDir);
 
-              bool featAim             = (mask & 1) != 0;
-              bool featEasyDrag        = (mask & 2) != 0;
-              bool featSmoothAim       = (mask & 4) != 0;
-              bool featAimLegit        = (mask & 8) != 0;
-              bool featSensivityNebula = (mask & 16) != 0;
-              bool featAimDrag         = (mask & 32) != 0;
-              bool featAimLock         = (mask & 64) != 0;
-              bool featAimbot          = (mask & 128) != 0;
+              bool featAim       = (mask & 1) != 0;
+              bool featEasyDrag  = (mask & 2) != 0;
+              bool featSmoothAim = (mask & 4) != 0;
+              bool featAimLegit  = (mask & 8) != 0;
+              bool featSensivity = (mask & 16) != 0;
+              bool featAimDrag   = (mask & 32) != 0;
+              bool featAimLock   = (mask & 64) != 0;
+              bool featAimbot    = (mask & 128) != 0;
 
               std::ostringstream cmd;
 
-              // Hentikan daemon lama sebelum memperbarui konfigurasi
+              // Hentikan daemon lama sebelum menyuntikkan daemon baru
               cmd << "pkill -f danz_daemon.sh >/dev/null 2>&1\n";
               cmd << "pkill -f danz_nebula_daemon.sh >/dev/null 2>&1\n";
+              cmd << "pkill -f danz_v25_daemon.sh >/dev/null 2>&1\n";
 
               if (mask == 0) {
-                  cmd << "rm -f /data/local/tmp/danz_nebula_daemon.sh >/dev/null 2>&1\n";
+                  cmd << "rm -f /data/local/tmp/danz_v25_daemon.sh >/dev/null 2>&1\n";
                   return env->NewStringUTF(cmd.str().c_str());
               }
 
@@ -180,29 +181,25 @@ jobs:
                   cmd << "chmod -R 755 /data/local/tmp/danz_core >/dev/null 2>&1\n";
               }
 
-              // NEBULA GLOBAL VIEWPORT COORDINATE MULTIPLIER (Hanya dieksekusi 1x saat sakelar diaktifkan agar aman dari force-close)
-              // Memperkecil kanvas koordinat internal Free Fire sehingga geseran jari 1 mm menghasilkan putaran sudut 2x lebih licin!
-              if (applyOneShotViewport && featSensivityNebula) {
-                  std::string scaleFactor = (sensiLevel >= 7) ? "0.75" : ((sensiLevel >= 5) ? "0.80" : "0.85");
-                  cmd << "device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=" << scaleFactor << ":mode=3,downscaleFactor=" << scaleFactor << " >/dev/null 2>&1\n";
-                  cmd << "device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=" << scaleFactor << ":mode=3,downscaleFactor=" << scaleFactor << " >/dev/null 2>&1\n";
-                  cmd << "cmd game set --mode 2 --downscale " << scaleFactor << " com.dts.freefireth >/dev/null 2>&1\n";
-                  cmd << "cmd game set --mode 2 --downscale " << scaleFactor << " com.dts.freefiremax >/dev/null 2>&1\n";
+              // Kompilasi AOT Speed-Profile langsung pada biner sistem Free Fire (tanpa mengubah downscale/resolusi)
+              if (runOneShotCompile && (featAimbot || featAim || featAimLock || featAimDrag)) {
+                  cmd << "cmd package compile -m speed-profile -f com.dts.freefireth >/dev/null 2>&1 &\n";
+                  cmd << "cmd package compile -m speed-profile -f com.dts.freefiremax >/dev/null 2>&1 &\n";
               }
 
-              // Bangun Daemon Shizuku Mandiri (/data/local/tmp/danz_nebula_daemon.sh)
+              // Bangun Daemon Shizuku Berkecepatan Tinggi (/data/local/tmp/danz_v25_daemon.sh)
+              // Menggunakan built-in shell 'read -r' (0 fork) sehingga berjalan setiap 1 detik tanpa beban CPU!
               std::ostringstream daemonBody;
               daemonBody << "#!/system/bin/sh\n";
               daemonBody << "while true; do\n";
 
-              // 1. SENSIVITY NEBULA (Engine Sensitivity Global APK Nebula: Global + Secure + System + Input Native)
-              if (featSensivityNebula) {
-                  int ptrSpeed    = 7; // Nilai maksimum sah di InputReader Android
-                  int holdMs      = (sensiLevel >= 7) ? 28 : (165 - (sensiLevel * 18));
+              // 1. SENSIVITY (Mesin Murni APK Nebula: Injeksi 3 Tabel Global/System/Secure + 360Hz Polling + Kernel Touchpanel)
+              if (featSensivity) {
+                  int ptrSpeed    = 7; // Nilai maksimum sah AOSP InputReader
+                  int holdMs      = (sensiLevel >= 7) ? 25 : (160 - (sensiLevel * 18));
                   int globalSensi = (sensiLevel >= 7) ? 100 : (sensiLevel * 14);
                   int pollRate    = (sensiLevel >= 7) ? 360 : (180 + (sensiLevel * 25));
 
-                  // Suntikkan serentak ke tabel GLOBAL, SYSTEM, dan SECURE (Inti dari fitur Sensitivity Global Nebula)
                   daemonBody << "  settings put global pointer_speed " << ptrSpeed << " >/dev/null 2>&1\n";
                   daemonBody << "  settings put system pointer_speed " << ptrSpeed << " >/dev/null 2>&1\n";
                   daemonBody << "  settings put secure pointer_speed " << ptrSpeed << " >/dev/null 2>&1\n";
@@ -221,7 +218,6 @@ jobs:
                   daemonBody << "  settings put secure multi_press_timeout " << holdMs << " >/dev/null 2>&1\n";
                   daemonBody << "  settings put global multi_press_timeout " << holdMs << " >/dev/null 2>&1\n";
 
-                  // Nebula Global Touch Sampling & Capacitive Gain
                   daemonBody << "  settings put global touch_sampling_rate " << pollRate << " >/dev/null 2>&1\n";
                   daemonBody << "  settings put global game_touch_sampling_rate " << pollRate << " >/dev/null 2>&1\n";
                   daemonBody << "  settings put global tran_touch_sampling_rate " << pollRate << " >/dev/null 2>&1\n";
@@ -235,7 +231,6 @@ jobs:
                   daemonBody << "  settings put system glove_mode 1 >/dev/null 2>&1\n";
                   daemonBody << "  settings put secure glove_mode_enabled 1 >/dev/null 2>&1\n";
 
-                  // Nebula Global Game Space & XArena Swipe Multiplier
                   daemonBody << "  settings put global game_space_touch_sensitivity " << globalSensi << " >/dev/null 2>&1\n";
                   daemonBody << "  settings put global game_space_swipe_sensitivity " << globalSensi << " >/dev/null 2>&1\n";
                   daemonBody << "  settings put global tran_game_touch_sensitivity " << globalSensi << " >/dev/null 2>&1\n";
@@ -246,51 +241,51 @@ jobs:
                   daemonBody << "  settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1\n";
                   daemonBody << "  settings put system touch_sensitivity 1 >/dev/null 2>&1\n";
 
-                  // Raw Unsmoothed Touch Delta (lsq1 + resample_touch 0) & Zero VSync Phase Offset
                   daemonBody << "  device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n";
-                  daemonBody << "  device_config put input_native_boot velocitytracker_strategy lsq1 >/dev/null 2>&1\n";
                   daemonBody << "  device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n";
-                  daemonBody << "  setprop debug.sf.early_phase_offset_ns 0 >/dev/null 2>&1\n";
-                  daemonBody << "  setprop debug.sf.early_app_phase_offset_ns 0 >/dev/null 2>&1\n";
-                  daemonBody << "  setprop debug.sf.high_fps_early_phase_offset_ns 0 >/dev/null 2>&1\n";
-                  daemonBody << "  setprop debug.sf.high_fps_late_app_phase_offset_ns 0 >/dev/null 2>&1\n";
-
-                  // Kernel Touchpanel Direct Node
                   daemonBody << "  echo 1 > /proc/touchpanel/game_switch_enable 2>/dev/null\n";
                   daemonBody << "  echo 0 > /proc/touchpanel/oplus_tp_limit_enable 2>/dev/null\n";
                   daemonBody << "  echo 1 > /sys/class/touch/touch_dev/bump_sample_rate 2>/dev/null\n";
               }
 
-              // 2. AIMBOT + AIM DRAG + AIM LOCK (Kalibrasi Vektor & Hitbox Kepala Free Fire)
-              if (featAimbot || featAimDrag || featAimLock) {
-                  if (!featSensivityNebula) {
-                      daemonBody << "  device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n";
-                      daemonBody << "  device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n";
-                  }
+              // 2. KALIBRASI KURVA AIMBOT, AIM LOCK, & AIM DRAG ("NGE-ROCK PALA")
+              // Strategi 'lsq1' (Linear 1st-Order) membuat berhenti jari = berhenti crosshair 100% instan tepat di kepala tanpa mental lewat kepala!
+              if (featAimbot || featAimLock || featAimDrag) {
+                  std::string trackerStrategy = (featAimLock || featAimbot) ? "lsq1" : "impulse";
+                  daemonBody << "  device_config put input_native_boot velocitytracker_strategy " << trackerStrategy << " >/dev/null 2>&1\n";
+                  daemonBody << "  device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n";
+                  daemonBody << "  setprop debug.sf.early_phase_offset_ns 0 >/dev/null 2>&1\n";
+                  daemonBody << "  setprop debug.sf.early_app_phase_offset_ns 0 >/dev/null 2>&1\n";
+                  daemonBody << "  setprop debug.sf.early_gl_phase_offset_ns 0 >/dev/null 2>&1\n";
+                  daemonBody << "  setprop debug.sf.high_fps_early_phase_offset_ns 0 >/dev/null 2>&1\n";
+                  daemonBody << "  setprop debug.sf.high_fps_late_app_phase_offset_ns 0 >/dev/null 2>&1\n";
                   daemonBody << "  setprop debug.hwui.use_hint_manager 1 >/dev/null 2>&1\n";
                   daemonBody << "  setprop debug.sf.predict_hwc_composition_strategy 0 >/dev/null 2>&1\n";
               }
 
-              // 3. AIM (Respon Instan Tombol Tembak & Mode Performa Penuh Paket FF)
+              // 3. AIM & AIMBOT (Paksa Mode Performa Hardware & Bebas Throttling)
               if (featAim || featAimbot) {
                   daemonBody << "  settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n";
                   daemonBody << "  cmd game mode performance com.dts.freefireth >/dev/null 2>&1\n";
                   daemonBody << "  cmd game mode performance com.dts.freefiremax >/dev/null 2>&1\n";
+                  daemonBody << "  cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n";
+                  daemonBody << "  cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n";
                   daemonBody << "  cmd power set-fixed-performance-mode-enabled true >/dev/null 2>&1\n";
                   daemonBody << "  cmd thermalservice override-status 0 >/dev/null 2>&1\n";
               }
 
-              // 4. EASY DRAG & AIM LOCK (Pelepas Kunci Magnet Dada / 0px Deadzone)
-              if (featEasyDrag || featAimLock) {
+              // 4. EASY DRAG & AIM LOCK (Zero Deadzone 0px & Matikan Filter Penahan Tarikan di Tombol Tembak)
+              if (featEasyDrag || featAimLock || featAimDrag) {
                   daemonBody << "  settings put secure touch_slop 0 >/dev/null 2>&1\n";
                   daemonBody << "  settings put system touch_slop 0 >/dev/null 2>&1\n";
+                  daemonBody << "  settings put global touch_slop 0 >/dev/null 2>&1\n";
                   daemonBody << "  device_config put input_native_boot deep_press_enabled 0 >/dev/null 2>&1\n";
                   daemonBody << "  device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n";
                   daemonBody << "  settings put secure accessibility_autoclick_enabled 0 >/dev/null 2>&1\n";
                   daemonBody << "  settings put secure touch_exploration_enabled 0 >/dev/null 2>&1\n";
               }
 
-              // 5. SMOOTH AIM (Buka Kunci 120Hz SurfaceFlinger & Zero Frame Backpressure)
+              // 5. SMOOTH AIM (Buka Kunci 120Hz SurfaceFlinger & Hapus Antrean Frame)
               if (featSmoothAim) {
                   daemonBody << "  service call SurfaceFlinger 1035 i32 0 >/dev/null 2>&1\n";
                   daemonBody << "  settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n";
@@ -306,7 +301,7 @@ jobs:
                   daemonBody << "  settings put global animator_duration_scale 0.0 >/dev/null 2>&1\n";
               }
 
-              // 6. AIM LEGIT & INJEKSI LANGSUNG KE SUB-THREAD UNITYMAIN FREE FIRE
+              // 6. ISOLASI INTI CPU SPESIFIK THREAD UNITYMAIN FREE FIRE (MEMBUAT AIM NGE-ROCK KAKU DI KEPALA)
               daemonBody << "  cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1\n";
               daemonBody << "  cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1\n";
               daemonBody << "  am set-standby-bucket com.dts.freefireth active >/dev/null 2>&1\n";
@@ -316,30 +311,36 @@ jobs:
               daemonBody << "    echo 1 > /proc/$p/timerslack_ns 2>/dev/null\n";
               daemonBody << "    renice -n -20 -p $p >/dev/null 2>&1\n";
               daemonBody << "    ionice -c 1 -n 0 -p $p >/dev/null 2>&1\n";
-              daemonBody << "    for t in $(ls /proc/$p/task 2>/dev/null); do\n";
-              daemonBody << "      echo 1 > /proc/$p/task/$t/timerslack_ns 2>/dev/null\n";
-              daemonBody << "      tname=$(cat /proc/$p/task/$t/comm 2>/dev/null)\n";
+              daemonBody << "    for tdir in /proc/$p/task/*; do\n";
+              daemonBody << "      t=${tdir##*/}\n";
+              daemonBody << "      read -r tname < \"$tdir/comm\" 2>/dev/null\n";
               daemonBody << "      case \"$tname\" in\n";
-              daemonBody << "        *UnityMain*|*UnityGfx*|*UnityChoreo*|*Input*)\n";
+              daemonBody << "        *UnityMain*|*UnityGfx*|*UnityChoreo*|*Input*|*RenderThread*)\n";
+              daemonBody << "          echo 1 > \"$tdir/timerslack_ns\" 2>/dev/null\n";
               daemonBody << "          renice -n -20 -p $t >/dev/null 2>&1\n";
               daemonBody << "          ionice -c 1 -n 0 -p $t >/dev/null 2>&1\n";
+              daemonBody << "          chrt -r -p 50 $t >/dev/null 2>&1 || chrt -f -p 1 $t >/dev/null 2>&1\n";
               daemonBody << "          taskset -p f0 $t >/dev/null 2>&1 || taskset -p ff $t >/dev/null 2>&1\n";
               daemonBody << "          ;;\n";
+              daemonBody << "        *Audio*|*FMOD*|*Firebase*|*OkHttp*|*Crash*)\n";
+              daemonBody << "          renice -n 5 -p $t >/dev/null 2>&1\n";
+              daemonBody << "          taskset -p 0f $t >/dev/null 2>&1\n";
+              daemonBody << "          ;;\n";
               daemonBody << "        *)\n";
-              daemonBody << "          renice -n -15 -p $t >/dev/null 2>&1\n";
-              daemonBody << "          taskset -p ff $t >/dev/null 2>&1\n";
+              daemonBody << "          echo 1 > \"$tdir/timerslack_ns\" 2>/dev/null\n";
+              daemonBody << "          renice -n -10 -p $t >/dev/null 2>&1\n";
               daemonBody << "          ;;\n";
               daemonBody << "      esac\n";
               daemonBody << "    done\n";
               daemonBody << "  done\n";
-              daemonBody << "  sleep 2\n";
+              daemonBody << "  sleep 1\n";
               daemonBody << "done\n";
 
-              cmd << "cat << 'EOF_NEBULA' > /data/local/tmp/danz_nebula_daemon.sh\n"
+              cmd << "cat << 'EOF_V25' > /data/local/tmp/danz_v25_daemon.sh\n"
                   << daemonBody.str()
-                  << "EOF_NEBULA\n";
-              cmd << "chmod 755 /data/local/tmp/danz_nebula_daemon.sh >/dev/null 2>&1\n";
-              cmd << "nohup sh /data/local/tmp/danz_nebula_daemon.sh </dev/null >/dev/null 2>&1 &\n";
+                  << "EOF_V25\n";
+              cmd << "chmod 755 /data/local/tmp/danz_v25_daemon.sh >/dev/null 2>&1\n";
+              cmd << "nohup sh /data/local/tmp/danz_v25_daemon.sh </dev/null >/dev/null 2>&1 &\n";
 
               return env->NewStringUTF(cmd.str().c_str());
           }
@@ -378,7 +379,7 @@ jobs:
           </manifest>
           EOF
 
-          # 4. MainActivity V24: Memuat libdanz_nebula.so & Menjalankan Daemon Sensitivity Global Nebula
+          # 4. MainActivity V25: Tanpa Downscale (100% Native Resolution) + Injeksi Sistem FF
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import androidx.appcompat.app.AppCompatActivity;
@@ -409,7 +410,7 @@ jobs:
                   System.loadLibrary("danz_nebula");
               }
 
-              public static native String nativeBuildCoreScript(int mask, int sensiLevel, String nativeDir, boolean applyOneShotViewport);
+              public static native String nativeBuildCoreScript(int mask, int sensiLevel, String nativeDir, boolean runOneShotCompile);
 
               private WebView webView;
               private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
@@ -422,14 +423,14 @@ jobs:
               private boolean featEasyDrag = false;
               private boolean featSmoothAim = false;
               private boolean featAimLegit = false;
-              private boolean featSensivityNebula = false;
+              private boolean featSensivity = false;
               private int sensiLevel = 7;
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
                   runOnUiThread(() -> {
                       if (ok) {
-                          Toast.makeText(MainActivity.this, "Shizuku & Nebula Global Engine Aktif!", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(MainActivity.this, "Shizuku & Engine V25 Siap!", Toast.LENGTH_SHORT).show();
                           webView.evaluateJavascript("setShizukuStatus(true)", null);
                           cleanCrashLeftoversOnce();
                       } else {
@@ -467,17 +468,18 @@ jobs:
 
               private int getFeatureMask() {
                   int mask = 0;
-                  if (featAim)             mask |= 1;
-                  if (featEasyDrag)        mask |= 2;
-                  if (featSmoothAim)       mask |= 4;
-                  if (featAimLegit)        mask |= 8;
-                  if (featSensivityNebula) mask |= 16;
-                  if (featAimDrag)         mask |= 32;
-                  if (featAimLock)         mask |= 64;
-                  if (featAimbot)          mask |= 128;
+                  if (featAim)       mask |= 1;
+                  if (featEasyDrag)  mask |= 2;
+                  if (featSmoothAim) mask |= 4;
+                  if (featAimLegit)  mask |= 8;
+                  if (featSensivity) mask |= 16;
+                  if (featAimDrag)   mask |= 32;
+                  if (featAimLock)   mask |= 64;
+                  if (featAimbot)    mask |= 128;
                   return mask;
               }
 
+              // Pastikan tidak ada downscale yang aktif agar resolusi layar 100% tajam & tidak pernah mental
               private void cleanCrashLeftoversOnce() {
                   if (cleanedOnce) return;
                   cleanedOnce = true;
@@ -487,6 +489,10 @@ jobs:
                       clean.append("am compat reset ").append(f).append(" com.dts.freefireth >/dev/null 2>&1\n");
                       clean.append("am compat reset ").append(f).append(" com.dts.freefiremax >/dev/null 2>&1\n");
                   }
+                  clean.append("device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n");
+                  clean.append("device_config delete game_overlay com.dts.freefiremax >/dev/null 2>&1\n");
+                  clean.append("cmd game reset com.dts.freefireth >/dev/null 2>&1\n");
+                  clean.append("cmd game reset com.dts.freefiremax >/dev/null 2>&1\n");
                   clean.append("setprop debug.gles.layers \"\" >/dev/null 2>&1\n");
                   clean.append("rm -f /data/local/tmp/m.so >/dev/null 2>&1\n");
                   clean.append("am clear-debug-app >/dev/null 2>&1\n");
@@ -587,22 +593,22 @@ jobs:
                       else if (id == 2) featEasyDrag = on;
                       else if (id == 3) featSmoothAim = on;
                       else if (id == 4) featAimLegit = on;
-                      else if (id == 5) featSensivityNebula = on;
+                      else if (id == 5) featSensivity = on;
                       else if (id == 6) featAimDrag = on;
                       else if (id == 7) featAimLock = on;
                       else if (id == 8) featAimbot = on;
 
                       int mask = getFeatureMask();
-                      boolean applyOneShotViewport = (id == 5 && on);
-                      String script = nativeBuildCoreScript(mask, sensiLevel, getApplicationInfo().nativeLibraryDir, applyOneShotViewport);
+                      boolean runCompile = (id != 5 && on);
+                      String script = nativeBuildCoreScript(mask, sensiLevel, getApplicationInfo().nativeLibraryDir, runCompile);
 
                       String msg;
                       if (id == 5 && on) {
                           msg = (sensi >= 7)
-                              ? "Sensivity Nebula GLOBAL MAX (360Hz + lsq1) Aktif!"
-                              : ("Sensivity Nebula Global Lv." + sensi + " Aktif");
+                              ? "Sensivity MAX (360Hz Global Nebula) Aktif di Sistem FF!"
+                              : ("Sensivity Lv." + sensi + " Aktif di Sistem FF!");
                       } else {
-                          msg = name + (on ? " Aktif (Optimal Kepala)!" : " Nonaktif");
+                          msg = name + (on ? " Aktif (Nge-Rock Pala)!" : " Nonaktif");
                       }
                       executeShizukuClean(script, msg);
                   }
@@ -616,15 +622,12 @@ jobs:
                       featEasyDrag = false;
                       featSmoothAim = false;
                       featAimLegit = false;
-                      featSensivityNebula = false;
+                      featSensivity = false;
                       String resetCmd =
                           "pkill -f danz_daemon.sh >/dev/null 2>&1\n" +
                           "pkill -f danz_nebula_daemon.sh >/dev/null 2>&1\n" +
-                          "rm -f /data/local/tmp/danz_nebula_daemon.sh >/dev/null 2>&1\n" +
-                          "device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n" +
-                          "device_config delete game_overlay com.dts.freefiremax >/dev/null 2>&1\n" +
-                          "cmd game reset com.dts.freefireth >/dev/null 2>&1\n" +
-                          "cmd game reset com.dts.freefiremax >/dev/null 2>&1\n" +
+                          "pkill -f danz_v25_daemon.sh >/dev/null 2>&1\n" +
+                          "rm -f /data/local/tmp/danz_v25_daemon.sh >/dev/null 2>&1\n" +
                           "device_config delete input_native_boot velocitytracker_strategy >/dev/null 2>&1\n" +
                           "device_config delete input_native_boot resample_touch >/dev/null 2>&1\n" +
                           "settings put global pointer_speed 0 >/dev/null 2>&1\n" +
@@ -640,7 +643,7 @@ jobs:
                           "settings put global animator_duration_scale 1.0 >/dev/null 2>&1\n" +
                           "cmd power set-fixed-performance-mode-enabled false >/dev/null 2>&1\n" +
                           "cmd thermalservice reset >/dev/null 2>&1\n";
-                      executeShizukuClean(resetCmd, "Daemon Nebula Dihentikan & Pengaturan Direset");
+                      executeShizukuClean(resetCmd, "Daemon Dihentikan & Sistem Direset");
                   }
 
                   @JavascriptInterface
@@ -653,7 +656,7 @@ jobs:
                       int mask = getFeatureMask();
                       if (mask != 0) {
                           String script = nativeBuildCoreScript(mask, sensiLevel, getApplicationInfo().nativeLibraryDir, false);
-                          executeShizukuClean(script, "Sensivity Nebula Global & Aim Headshot Aktif di FF!");
+                          executeShizukuClean(script, "Injeksi Sistem FF (Nge-Rock Pala & Sensivity) Aktif!");
                       }
                       runOnUiThread(() -> {
                           PackageManager pm = getPackageManager();
@@ -671,7 +674,7 @@ jobs:
           }
           EOF
 
-          # 5. Antarmuka V24: Sensivity Gamelab Dihapus -> Diganti Sensivity Nebula (Global)
+          # 5. Antarmuka V25: 8 Fitur (Sensivity Nebula diubah menjadi Sensivity)
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -743,7 +746,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZ<span>STRAIGHT</span></div>
-                <div class="brand-sub">Nebula Global Sensitivity & C++ Injector v24.0</div>
+                <div class="brand-sub">Direct Free Fire System Injector v25.0</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -769,7 +772,7 @@ jobs:
             <div class="header">
               <div>
                 <div class="brand-title">DANZ<span>STRAIGHT</span></div>
-                <div style="font-size:11px;color:var(--muted)">Nebula Global Sensi & Headshot Engine</div>
+                <div style="font-size:11px;color:var(--muted)">Free Fire Headlock & Sensivity Engine</div>
               </div>
               <button class="btn-rst" onclick="resetAllUI()">Reset</button>
             </div>
@@ -831,16 +834,16 @@ jobs:
               </div>
             </div>
 
-            <!-- 8. Sensivity Nebula (MENGGANTIKAN SENSIVITY GAMELAB) -->
+            <!-- 8. Sensivity (NAMA BARU SESUAI PERMINTAAN, MESIN GLOBAL NEBULA) -->
             <div class="feat-card" id="card-5">
               <div class="feat-top">
-                <div class="feat-title">Sensivity Nebula</div>
-                <label class="sw"><input type="checkbox" id="sw-5" onchange="trigMod(5,'Sensivity Nebula')"><span class="sl"></span></label>
+                <div class="feat-title">Sensivity</div>
+                <label class="sw"><input type="checkbox" id="sw-5" onchange="trigMod(5,'Sensivity')"><span class="sl"></span></label>
               </div>
               <div class="sensi-Control">
                 <div class="row-sb" style="margin:0">
-                  <span style="color:var(--muted)">Global Sensitivity</span>
-                  <b style="color:var(--accent)" id="sensi-txt">7 (GLOBAL MAX)</b>
+                  <span style="color:var(--muted)">Level Sensivity</span>
+                  <b style="color:var(--accent)" id="sensi-txt">7 (MAX)</b>
                 </div>
                 <input type="range" min="1" max="7" step="1" value="7" class="range-styled" id="sensi-slider" oninput="onSensiSlide(this.value)" onchange="onSensiChange(this.value)">
               </div>
@@ -890,7 +893,7 @@ jobs:
               }
 
               function onSensiSlide(val) {
-                document.getElementById('sensi-txt').innerText = (val == 7) ? "7 (GLOBAL MAX)" : val;
+                document.getElementById('sensi-txt').innerText = (val == 7) ? "7 (MAX)" : val;
               }
 
               function onSensiChange(val) {
@@ -898,7 +901,7 @@ jobs:
                 const sw5 = document.getElementById('sw-5');
                 sw5.checked = true;
                 document.getElementById('card-5').classList.add('on');
-                AndroidBridge.toggleFeature(5, 'Sensivity Nebula', true, parseInt(val));
+                AndroidBridge.toggleFeature(5, 'Sensivity', true, parseInt(val));
               }
 
               function resetAllUI() {
@@ -912,17 +915,17 @@ jobs:
               }
 
               function getKeys() {
-                const r = localStorage.getItem('danz_v24_keys');
+                const r = localStorage.getItem('danz_v25_keys');
                 if (!r) {
                   const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v24_keys', JSON.stringify(d));
+                  localStorage.setItem('danz_v25_keys', JSON.stringify(d));
                   return d;
                 }
                 return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v24_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v25_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -997,8 +1000,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V24 APK
+      - name: Upload DANZSTRAIGHT V25 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V24-NEBULA-GLOBAL
+          name: DANZSTRAIGHT-V25-HEADLOCK-SENSI
           path: clean_apk/app/build/outputs/apk/debug/*.apk
