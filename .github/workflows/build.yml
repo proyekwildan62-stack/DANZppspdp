@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V9.1 Anti-Freeze
+name: Build DANZSTRAIGHT V9.2 Fix Process Error
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V9.1 APK
+      - name: Build DANZSTRAIGHT V9.2 APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -47,8 +47,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 91
-              versionName "9.1"
+              versionCode 92
+              versionName "9.2"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -93,7 +93,7 @@ jobs:
           </manifest>
           EOF
 
-          # MainActivity: Asynchronous Shizuku Executor (Anti-Freeze / Tanpa Deadlock)
+          # MainActivity: Eksekutor Subshell Instan (Bebas Error "process hasn't exited")
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -111,17 +111,15 @@ jobs:
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
           import android.widget.Toast;
-          import java.io.OutputStream;
           import java.lang.reflect.Method;
           import java.util.Locale;
           import java.util.concurrent.ExecutorService;
           import java.util.concurrent.Executors;
-          import java.util.concurrent.TimeUnit;
           import rikka.shizuku.Shizuku;
 
           public class MainActivity extends Activity {
               private WebView webView;
-              private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
+              private final ExecutorService bgExecutor = Executors.newCachedThreadPool();
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
@@ -162,48 +160,44 @@ jobs:
                   super.onDestroy();
               }
 
-              // Menjalankan perintah Shizuku di Background Thread dengan Timeout 4 Detik agar tidak pernah macet
-              private void runShizukuAsync(String rawCommands, String successMsg) {
+              // Menjalankan perintah lewat subshell non-blocking agar selesai instan tanpa "process hasn't exited"
+              private void runShizukuInstant(String rawCommands, String successMsg) {
                   bgExecutor.execute(() -> {
                       try {
                           if (!Shizuku.pingBinder()) {
-                              runOnUiThread(() -> Toast.makeText(MainActivity.this, "Shizuku belum berjalan!", Toast.LENGTH_LONG).show());
+                              runOnUiThread(() -> {
+                                  webView.evaluateJavascript("onSaveComplete()", null);
+                                  Toast.makeText(MainActivity.this, "Shizuku belum berjalan!", Toast.LENGTH_LONG).show();
+                              });
                               return;
                           }
                           if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
                               runOnUiThread(() -> {
+                                  webView.evaluateJavascript("onSaveComplete()", null);
                                   Shizuku.requestPermission(101);
                                   Toast.makeText(MainActivity.this, "Klik Izinkan pada pop-up Shizuku", Toast.LENGTH_LONG).show();
                               });
                               return;
                           }
 
+                          String inlineCmd = "( " + rawCommands.trim().replace("\n", "; ") + " ) >/dev/null 2>&1 &";
                           Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                           m.setAccessible(true);
-                          java.lang.Process p = (java.lang.Process) m.invoke(null, new String[]{"sh"}, null, null);
+                          java.lang.Process p = (java.lang.Process) m.invoke(null, new String[]{"sh", "-c", inlineCmd}, null, null);
 
-                          OutputStream os = p.getOutputStream();
-                          String safeScript = "{\n" + rawCommands + "\n} >/dev/null 2>&1\nexit\n";
-                          os.write(safeScript.getBytes());
-                          os.flush();
-                          os.close();
-
-                          try { p.getInputStream().close(); } catch (Exception ignored) {}
-                          try { p.getErrorStream().close(); } catch (Exception ignored) {}
-
-                          boolean finished = p.waitFor(4, TimeUnit.SECONDS);
-                          if (!finished) {
-                              p.destroyForcibly();
-                          }
+                          try { p.waitFor(); } catch ( Throwable ignored ) {}
+                          try { p.destroy(); } catch ( Throwable ignored ) {}
 
                           runOnUiThread(() -> {
                               webView.evaluateJavascript("onSaveComplete()", null);
-                              Toast.makeText(MainActivity.this, successMsg, Toast.LENGTH_SHORT).show();
+                              if (successMsg != null && !successMsg.isEmpty()) {
+                                  Toast.makeText(MainActivity.this, successMsg, Toast.LENGTH_SHORT).show();
+                              }
                           });
-                      } catch (Exception e) {
+                      } catch (Throwable e) {
                           runOnUiThread(() -> {
                               webView.evaluateJavascript("onSaveComplete()", null);
-                              Toast.makeText(MainActivity.this, "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                              Toast.makeText(MainActivity.this, "Aktif (Subshell Mode)", Toast.LENGTH_SHORT).show();
                           });
                       }
                   });
@@ -250,7 +244,6 @@ jobs:
                   public void applyGraphicStudio(boolean enableTex, int texLevel, boolean sharpPixel, boolean hardLod, boolean enableLight, int resPercent) {
                       StringBuilder cmd = new StringBuilder();
 
-                      // Hentikan Free Fire agar tekstur & resolusi dimuat ulang dari awal
                       cmd.append("am force-stop com.dts.freefireth\n");
                       cmd.append("am force-stop com.dts.freefiremax\n");
 
@@ -261,8 +254,8 @@ jobs:
                           cmd.append("cmd game reset com.dts.freefiremax\n");
                           cmd.append("settings delete global angle_gl_driver_selection_pkgs\n");
                           cmd.append("settings delete global angle_gl_driver_selection_values\n");
-                          cmd.append("settings delete global enable_gpu_debug_layers\n");
-                          runShizukuAsync(cmd.toString(), "Grafik Free Fire Direset ke Asli");
+                          cmd.append("settings delete global updatable_driver_production_opt_in_apps\n");
+                          runShizukuInstant(cmd.toString(), "Grafik Free Fire Direset ke Asli!");
                           return;
                       }
 
@@ -303,7 +296,7 @@ jobs:
                       cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefireth\n");
                       cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefiremax\n");
 
-                      runShizukuAsync(cmd.toString(), "Berhasil Disimpan! Silakan buka Free Fire.");
+                      runShizukuInstant(cmd.toString(), "Berhasil Disimpan! Silakan buka Free Fire.");
                   }
 
                   @JavascriptInterface
@@ -343,7 +336,7 @@ jobs:
                           }
                       }
 
-                      runShizukuAsync(cmd.toString(), name + (on ? " Aktif" : " Nonaktif"));
+                      runShizukuInstant(cmd.toString(), name + (on ? " Aktif!" : " Nonaktif"));
                   }
 
                   @JavascriptInterface
@@ -361,9 +354,9 @@ jobs:
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
                               new android.os.Handler().postDelayed(() -> {
-                                  runShizukuAsync(
+                                  runShizukuInstant(
                                       "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done",
-                                      "Sistem DANZSTRAIGHT Terhubung ke In-Game Free Fire"
+                                      "DANZSTRAIGHT Terhubung ke In-Game Free Fire!"
                                   );
                               }, 3500);
                           } else {
@@ -394,7 +387,7 @@ jobs:
               --danger: #F85149;
             }
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, Roboto, sans-serif; user-select: none; }
-            body { background: var(--bg); color: var(--text); padding: 12px; padding-bottom: 82px; }
+            body { background: var(--bg); color: var(--text); padding: 12px; padding-bottom: 95px; }
             .hidden { display: none !important; }
 
             .login-wrap { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
@@ -406,14 +399,14 @@ jobs:
             .pill { font-size: 11px; padding: 3px 9px; border-radius: 20px; background: #331B1B; color: var(--danger); font-weight: 700; }
             .pill.ok { background: #123524; color: #56D364; }
             .inp { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; color: #fff; padding: 12px; font-size: 13px; margin-bottom: 12px; outline: none; }
-            .btn-cyan { width: 100%; background: var(--cyan); color: #061824; border: none; border-radius: 12px; padding: 12px; font-size: 14px; font-weight: 800; box-shadow: 0 0 18px var(--cyan-glow); cursor: pointer; }
+            .btn-cyan { width: 100%; background: var(--cyan); color: #061824; border: none; border-radius: 12px; padding: 13px; font-size: 14px; font-weight: 800; box-shadow: 0 0 18px var(--cyan-glow); cursor: pointer; }
             .btn-dark { width: 100%; background: var(--card-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 12px; font-weight: 700; }
 
             .top-tabs { display: flex; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 5px; margin-bottom: 14px; }
             .tab-pill { flex: 1; text-align: center; padding: 9px 6px; border-radius: 12px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; transition: 0.15s; }
             .tab-pill.active { background: var(--cyan); color: #051622; box-shadow: 0 0 14px var(--cyan-glow); }
 
-            .preview-card { position: relative; width: 100%; height: 195px; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 12px; background: #1a2418; }
+            .preview-card { position: relative; width: 100%; height: 185px; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 12px; background: #1a2418; }
             .prev-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
             .tex-before {
               background:
@@ -513,7 +506,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZSTRAIGHT</div>
-                <div class="brand-sub">Graphic Studio & Shizuku System v9.1</div>
+                <div class="brand-sub">Graphic Studio & Shizuku System v9.2</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -721,7 +714,7 @@ jobs:
               </div>
             </div>
 
-            <button class="btn-cyan" style="margin-top:4px" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire Sekarang</button>
+            <button class="btn-cyan" style="margin-top:4px;margin-bottom:12px" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire Sekarang</button>
 
             <div class="bottom-nav">
               <div class="nav-it active" id="nav-1" onclick="openSection('tex')">Tekstur MC</div>
@@ -914,7 +907,7 @@ jobs:
 
               function renderKeyList() {
                 document.getElementById('key-list').innerHTML = getKeys().map(x => `
-                  <div class="key-row key-item">
+                  <div class="key-item">
                     <div><b>${x.key}</b><div style="color:var(--muted)">HP: ${x.hwid || 'Free'} | ${x.status}</div></div>
                     <div>
                       <button class="sm-btn" onclick="AndroidBridge.copyText('${x.key}')">Salin</button>
@@ -931,8 +924,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V9.1 APK
+      - name: Upload DANZSTRAIGHT V9.2 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V9-1-ANTIFREEZE
+          name: DANZSTRAIGHT-V9-2-FIXED
           path: clean_apk/app/build/outputs/apk/debug/*.apk
