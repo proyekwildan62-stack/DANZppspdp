@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT Tactical V5
+name: Build DANZSTRAIGHT V6 Clean Edition
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Compile Tactical Carbon V5 APK
+      - name: Build APK with Shizuku Binder & In-Game Service
         run: |
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
           mkdir -p clean_apk/app/src/main/assets
@@ -40,8 +40,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 34
-              versionCode 55
-              versionName "5.5-TACTICAL"
+              versionCode 60
+              versionName "6.0"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -58,7 +58,8 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES"/>
-              <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <queries>
                   <package android:name="moe.shizuku.privileged.api" />
                   <package android:name="com.dts.freefireth" />
@@ -77,6 +78,10 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
+                  <service
+                      android:name=".InGameService"
+                      android:enabled="true"
+                      android:exported="false" />
                   <provider
                       android:name="rikka.shizuku.ShizukuProvider"
                       android:authorities="${applicationId}.shizuku"
@@ -88,6 +93,45 @@ jobs:
           </manifest>
           EOF
 
+          # Service Penjaga Proses Selama Bermain Free Fire
+          cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/InGameService.java
+          package com.danzstraight.mod;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.os.Build;
+          import android.os.IBinder;
+          import android.os.Process;
+
+          public class InGameService extends Service {
+              @Override
+              public IBinder onBind(Intent intent) { return null; }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
+                  String info = intent != null ? intent.getStringExtra("status") : "Shizuku In-Game Aktif";
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      String cid = "danz_service";
+                      NotificationChannel ch = new NotificationChannel(cid, "DANZSTRAIGHT Engine", NotificationManager.IMPORTANCE_LOW);
+                      NotificationManager nm = getSystemService(NotificationManager.class);
+                      if (nm != null) nm.createNotificationChannel(ch);
+                      Notification n = new Notification.Builder(this, cid)
+                              .setContentTitle("DANZSTRAIGHT Aktif di In-Game")
+                              .setContentText(info)
+                              .setSmallIcon(android.R.drawable.ic_media_play)
+                              .setOngoing(true)
+                              .build();
+                      startForeground(101, n);
+                  }
+                  return START_STICKY;
+              }
+          }
+          EOF
+
+          # MainActivity: Eksekutor Shizuku ADB Shell
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -99,30 +143,32 @@ jobs:
           import android.content.pm.ApplicationInfo;
           import android.content.pm.PackageManager;
           import android.graphics.Color;
+          import android.os.Build;
           import android.os.Bundle;
           import android.provider.Settings;
+          import android.util.DisplayMetrics;
           import android.view.Window;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
           import android.widget.Toast;
-          import java.io.BufferedReader;
-          import java.io.InputStreamReader;
+          import java.io.OutputStream;
           import java.lang.reflect.Method;
           import rikka.shizuku.Shizuku;
 
           public class MainActivity extends Activity {
               private WebView webView;
+              private int baseDpi = 360;
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
                   runOnUiThread(() -> {
                       if (ok) {
-                          Toast.makeText(MainActivity.this, "SHIZUKU BINDER CONNECTED", Toast.LENGTH_SHORT).show();
-                          webView.evaluateJavascript("onShizukuReady(true)", null);
+                          Toast.makeText(MainActivity.this, "Shizuku Terhubung", Toast.LENGTH_SHORT).show();
+                          webView.evaluateJavascript("setShizukuStatus(true)", null);
                       } else {
-                          Toast.makeText(MainActivity.this, "SHIZUKU PERMISSION DENIED", Toast.LENGTH_LONG).show();
+                          Toast.makeText(MainActivity.this, "Izin Shizuku Ditolak", Toast.LENGTH_LONG).show();
                       }
                   });
               };
@@ -131,15 +177,19 @@ jobs:
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   requestWindowFeature(Window.FEATURE_NO_TITLE);
-                  getWindow().setStatusBarColor(Color.parseColor("#090A0F"));
-                  getWindow().setNavigationBarColor(Color.parseColor("#090A0F"));
+                  getWindow().setStatusBarColor(Color.parseColor("#111214"));
+                  getWindow().setNavigationBarColor(Color.parseColor("#111214"));
+
+                  DisplayMetrics dm = getResources().getDisplayMetrics();
+                  baseDpi = dm.densityDpi > 0 ? dm.densityDpi : 360;
+
                   Shizuku.addRequestPermissionResultListener(PERM_LISTENER);
 
                   webView = new WebView(this);
                   WebSettings s = webView.getSettings();
                   s.setJavaScriptEnabled(true);
                   s.setDomStorageEnabled(true);
-                  webView.setBackgroundColor(Color.parseColor("#090A0F"));
+                  webView.setBackgroundColor(Color.parseColor("#111214"));
                   webView.setWebViewClient(new WebViewClient());
                   webView.addJavascriptInterface(new Bridge(), "AndroidBridge");
                   webView.loadUrl("file:///android_asset/index.html");
@@ -152,22 +202,34 @@ jobs:
                   super.onDestroy();
               }
 
-              private String execShizuku(String cmd) {
+              private String execShizukuShell(String commands) {
                   try {
-                      if (!Shizuku.pingBinder()) return "ERR: SHIZUKU_OFFLINE";
+                      if (!Shizuku.pingBinder()) return "ERR: Shizuku belum berjalan";
                       if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
                           Shizuku.requestPermission(101);
-                          return "ERR: GRANT_SHIZUKU_POPUP";
+                          return "ERR: Klik Izinkan pada pop-up Shizuku";
                       }
                       Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                       m.setAccessible(true);
-                      Process p = (Process) m.invoke(null, new String[]{"sh", "-c", cmd}, null, null);
-                      BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                      while (r.readLine() != null) {}
+                      Process p = (Process) m.invoke(null, new String[]{"sh"}, null, null);
+                      OutputStream os = p.getOutputStream();
+                      os.write((commands + "\nexit\n").getBytes());
+                      os.flush();
+                      os.close();
                       p.waitFor();
                       return "OK";
                   } catch (Exception e) {
                       return "ERR: " + e.getMessage();
+                  }
+              }
+
+              private void startKeepAlive(String msg) {
+                  Intent svc = new Intent(this, InGameService.class);
+                  svc.putExtra("status", msg);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      startForegroundService(svc);
+                  } else {
+                      startService(svc);
                   }
               }
 
@@ -183,18 +245,18 @@ jobs:
                       runOnUiThread(() -> {
                           try {
                               if (!Shizuku.pingBinder()) {
-                                  Toast.makeText(MainActivity.this, "Jalankan aplikasi Shizuku (Start) terlebih dahulu!", Toast.LENGTH_LONG).show();
+                                  Toast.makeText(MainActivity.this, "Buka aplikasi Shizuku dan klik Start terlebih dahulu", Toast.LENGTH_LONG).show();
                                   Intent i = getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
                                   if (i != null) startActivity(i);
                                   return;
                               }
                               if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                                  webView.evaluateJavascript("onShizukuReady(true)", null);
+                                  webView.evaluateJavascript("setShizukuStatus(true)", null);
                               } else {
                                   Shizuku.requestPermission(101);
                               }
                           } catch (Exception e) {
-                              Toast.makeText(MainActivity.this, "Shizuku belum aktif!", Toast.LENGTH_SHORT).show();
+                              Toast.makeText(MainActivity.this, "Shizuku belum aktif", Toast.LENGTH_SHORT).show();
                           }
                       });
                   }
@@ -204,64 +266,129 @@ jobs:
                       runOnUiThread(() -> {
                           ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                           cb.setPrimaryClip(ClipData.newPlainText("KEY", txt));
-                          Toast.makeText(MainActivity.this, "COPIED: " + txt, Toast.LENGTH_SHORT).show();
+                          Toast.makeText(MainActivity.this, "Disalin: " + txt, Toast.LENGTH_SHORT).show();
                       });
                   }
 
                   @JavascriptInterface
-                  public String runModule(int id, String name, boolean on, int sensi, int mcType) {
-                      String cmd = "";
-                      if (id == 1) { // Aim Legit
-                          cmd = on ? "settings put system pointer_speed 5; settings put secure long_press_timeout 200"
-                                   : "settings put system pointer_speed 0; settings put secure long_press_timeout 400";
-                      } else if (id == 2) { // Aim Trick
-                          cmd = on ? "settings put system pointer_speed 6; settings put global window_animation_scale 0.0; settings put global transition_animation_scale 0.0"
-                                   : "settings put global window_animation_scale 1.0; settings put global transition_animation_scale 1.0";
-                      } else if (id == 3) { // Drag HS
-                          cmd = on ? "settings put system pointer_speed 7; settings put secure long_press_timeout 130; settings put global animator_duration_scale 0.0"
-                                   : "settings put system pointer_speed 0; settings put secure long_press_timeout 400; settings put global animator_duration_scale 1.0";
-                      } else if (id == 4) { // Sensivity 1-7
-                          int dpi = 360 - (sensi * 18);
-                          cmd = on ? "settings put system pointer_speed " + sensi + "; wm density " + dpi
-                                   : "settings put system pointer_speed 0; wm density reset";
-                      } else if (id == 5) { // Boost HP
-                          cmd = on ? "cmd game mode performance com.dts.freefireth; cmd game mode performance com.dts.freefiremax; settings put system peak_refresh_rate 120.0; settings put system min_refresh_rate 120.0; pm trim-caches 999999999; am kill-all"
-                                   : "settings put system min_refresh_rate 60.0";
-                      } else if (id == 6) { // Graphic MC (1. Minecraft / 2. Burik PC)
+                  public String runFeature(int id, String name, boolean on, int sensi, int lightMode) {
+                      StringBuilder cmd = new StringBuilder();
+
+                      if (id == 1) { // Aim Merah / Drag HS
                           if (on) {
-                              cmd = (mcType == 1)
-                                  ? "cmd game set --mode performance --downscale 0.5 com.dts.freefireth; cmd game set --mode performance --downscale 0.5 com.dts.freefiremax; wm size 540x960; setprop debug.hwui.renderer skiagl"
-                                  : "cmd game set --mode performance --downscale 0.65 com.dts.freefireth; cmd game set --mode performance --downscale 0.65 com.dts.freefiremax; wm size 640x1136; wm density 180; setprop debug.hwui.renderer opengl";
+                              cmd.append("settings put system pointer_speed 7\n");
+                              cmd.append("settings put secure long_press_timeout 120\n");
+                              cmd.append("settings put system touch_blocking_period 0.0\n");
                           } else {
-                              cmd = "wm size reset; wm density reset; cmd game reset com.dts.freefireth; cmd game reset com.dts.freefiremax";
+                              cmd.append("settings put system pointer_speed 0\n");
+                              cmd.append("settings put secure long_press_timeout 400\n");
                           }
-                      } else if (id == 7) { // Easy Drag (NEW)
-                          cmd = on ? "settings put system pointer_speed 7; settings put secure multi_press_timeout 100; settings put secure long_press_timeout 120; wm density 280"
-                                   : "settings put secure multi_press_timeout 300; settings put secure long_press_timeout 400; wm density reset";
-                      } else if (id == 8) { // Smooth Aim (NEW)
-                          cmd = on ? "setprop debug.sf.latch_unsignaled 1; setprop debug.performance.tuning 1; settings put system peak_refresh_rate 120.0; settings put global window_animation_scale 0.0"
-                                   : "setprop debug.sf.latch_unsignaled 0; settings put global window_animation_scale 1.0";
+                      } else if (id == 2) { // Easy Drag
+                          int dragDpi = Math.max(200, baseDpi - 70);
+                          if (on) {
+                              cmd.append("settings put system pointer_speed 7\n");
+                              cmd.append("settings put secure multi_press_timeout 100\n");
+                              cmd.append("settings put secure long_press_timeout 110\n");
+                              cmd.append("wm density ").append(dragDpi).append("\n");
+                          } else {
+                              cmd.append("settings put secure multi_press_timeout 300\n");
+                              cmd.append("wm density reset\n");
+                          }
+                      } else if (id == 3) { // Smooth Aim
+                          if (on) {
+                              cmd.append("setprop debug.sf.latch_unsignaled 1\n");
+                              cmd.append("setprop debug.performance.tuning 1\n");
+                              cmd.append("settings put global window_animation_scale 0.0\n");
+                              cmd.append("settings put global transition_animation_scale 0.0\n");
+                              cmd.append("settings put global animator_duration_scale 0.0\n");
+                          } else {
+                              cmd.append("setprop debug.sf.latch_unsignaled 0\n");
+                              cmd.append("settings put global window_animation_scale 1.0\n");
+                              cmd.append("settings put global transition_animation_scale 1.0\n");
+                              cmd.append("settings put global animator_duration_scale 1.0\n");
+                          }
+                      } else if (id == 4) { // Aim Legit & Stabilizer
+                          if (on) {
+                              cmd.append("settings put system pointer_speed 5\n");
+                              cmd.append("settings put secure tap_duration_threshold 0.0\n");
+                              cmd.append("settings put secure touch_exploration_enabled 0\n");
+                          } else {
+                              cmd.append("settings put system pointer_speed 0\n");
+                          }
+                      } else if (id == 5) { // Sensitivitas (Level 1 - 7)
+                          int targetDpi = Math.max(180, baseDpi - (sensi * 22));
+                          if (on) {
+                              cmd.append("settings put system pointer_speed ").append(sensi).append("\n");
+                              cmd.append("wm density ").append(targetDpi).append("\n");
+                          } else {
+                              cmd.append("settings put system pointer_speed 0\n");
+                              cmd.append("wm density reset\n");
+                          }
+                      } else if (id == 6) { // Boost Performa & Kunci FPS
+                          if (on) {
+                              cmd.append("cmd game mode performance com.dts.freefireth\n");
+                              cmd.append("cmd game mode performance com.dts.freefiremax\n");
+                              cmd.append("settings put system peak_refresh_rate 120.0\n");
+                              cmd.append("settings put system min_refresh_rate 120.0\n");
+                              cmd.append("pm trim-caches 999999999\n");
+                          } else {
+                              cmd.append("settings put system min_refresh_rate 60.0\n");
+                          }
+                      } else if (id == 7) { // GRAFIK RINGAN (Pengganti Graphic MC)
+                          if (on) {
+                              if (lightMode == 1) {
+                                  // Mode 1: Super Ringan (Low Poly / Tekstur Halus seperti di Foto)
+                                  cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=0.35:mode=3,downscaleFactor=0.35\n");
+                                  cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=0.35:mode=3,downscaleFactor=0.35\n");
+                                  cmd.append("cmd game set --mode 2 --downscale 0.35 com.dts.freefireth\n");
+                                  cmd.append("cmd game set --mode 2 --downscale 0.35 com.dts.freefiremax\n");
+                                  cmd.append("wm size 540x1200\n");
+                                  cmd.append("setprop debug.hwui.renderer skiagl\n");
+                              } else {
+                                  // Mode 2: Burik PC (Layar Lebar / Stretched Emulator)
+                                  cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=0.5:mode=3,downscaleFactor=0.5\n");
+                                  cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=0.5:mode=3,downscaleFactor=0.5\n");
+                                  cmd.append("cmd game set --mode 2 --downscale 0.5 com.dts.freefireth\n");
+                                  cmd.append("cmd game set --mode 2 --downscale 0.5 com.dts.freefiremax\n");
+                                  cmd.append("wm size 640x1136\n");
+                                  cmd.append("wm density 180\n");
+                                  cmd.append("setprop debug.hwui.renderer opengl\n");
+                              }
+                          } else {
+                              cmd.append("device_config delete game_overlay com.dts.freefireth\n");
+                              cmd.append("device_config delete game_overlay com.dts.freefiremax\n");
+                              cmd.append("cmd game reset com.dts.freefireth\n");
+                              cmd.append("cmd game reset com.dts.freefiremax\n");
+                              cmd.append("wm size reset\n");
+                              cmd.append("wm density reset\n");
+                          }
                       }
 
-                      String res = execShizuku(cmd);
+                      String res = execShizukuShell(cmd.toString());
+
                       runOnUiThread(() -> {
-                          if (id == 5 && on) {
-                              ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-                              for (ApplicationInfo app : getPackageManager().getInstalledApplications(0)) {
-                                  if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0 && !app.packageName.equals(getPackageName())) {
-                                      am.killBackgroundProcesses(app.packageName);
+                          if (res.equals("OK")) {
+                              startKeepAlive(name + " Aktif");
+                              if (id == 6 && on) {
+                                  ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+                                  for (ApplicationInfo app : getPackageManager().getInstalledApplications(0)) {
+                                      if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0 && !app.packageName.equals(getPackageName())) {
+                                          am.killBackgroundProcesses(app.packageName);
+                                      }
                                   }
                               }
+                              Toast.makeText(MainActivity.this, name + (on ? " Diaktifkan" : " Dinonaktifkan"), Toast.LENGTH_SHORT).show();
+                          } else {
+                              Toast.makeText(MainActivity.this, res, Toast.LENGTH_LONG).show();
                           }
-                          Toast.makeText(MainActivity.this, res.equals("OK") ? (name + (on ? " [INJECTED]" : " [RESET]")) : res, Toast.LENGTH_SHORT).show();
                       });
-                      return res.equals("OK") ? ("ADB_OK >> " + name + (on ? " ON" : " OFF")) : res;
+                      return res.equals("OK") ? (name + (on ? " : Aktif" : " : Nonaktif")) : res;
                   }
 
                   @JavascriptInterface
-                  public void resetDisplay() {
-                      execShizuku("wm size reset; wm density reset; settings put system pointer_speed 0; settings put global window_animation_scale 1.0; settings put global transition_animation_scale 1.0; settings put global animator_duration_scale 1.0");
-                      runOnUiThread(() -> Toast.makeText(MainActivity.this, "SYSTEM DISPLAY & DPI RESTORED", Toast.LENGTH_SHORT).show());
+                  public void resetAll() {
+                      execShizukuShell("wm size reset\nwm density reset\ndevice_config delete game_overlay com.dts.freefireth\ndevice_config delete game_overlay com.dts.freefiremax\ncmd game reset com.dts.freefireth\ncmd game reset com.dts.freefiremax\nsettings put system pointer_speed 0\nsettings put global window_animation_scale 1.0\nsettings put global transition_animation_scale 1.0\nsettings put global animator_duration_scale 1.0\n");
+                      runOnUiThread(() -> Toast.makeText(MainActivity.this, "Semua Pengaturan & Layar Dikembalikan Normal", Toast.LENGTH_LONG).show());
                   }
 
                   @JavascriptInterface
@@ -270,8 +397,9 @@ jobs:
                   }
 
                   @JavascriptInterface
-                  public void launchFF() {
+                  public void launchFreeFire() {
                       runOnUiThread(() -> {
+                          startKeepAlive("Injeksi In-Game Berjalan");
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
@@ -279,7 +407,7 @@ jobs:
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
                           } else {
-                              Toast.makeText(MainActivity.this, "MODULES ACTIVE - OPEN FREE FIRE", Toast.LENGTH_LONG).show();
+                              Toast.makeText(MainActivity.this, "Pengaturan Aktif. Silakan buka Free Fire.", Toast.LENGTH_LONG).show();
                           }
                       });
                   }
@@ -287,7 +415,7 @@ jobs:
           }
           EOF
 
-          # Antarmuka V5: Tactical Carbon & Crimson (No AI Emojis, Sharp Chamfered UI)
+          # Antarmuka Clean Dark Android Native (Tanpa Emoji, Tanpa Gaya AI)
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -296,367 +424,380 @@ jobs:
           <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
           <style>
             :root {
-              --bg: #090A0F;
-              --panel: #11131A;
-              --card: #161922;
-              --line: #252A38;
-              --red: #E60026;
-              --green: #00FF66;
-              --txt: #ECEFF4;
-              --sub: #7C8496;
+              --bg: #111214;
+              --surface: #1A1C20;
+              --border: #2A2D34;
+              --accent: #D32F2F;
+              --active: #2E7D32;
+              --active-light: #4CAF50;
+              --text: #F1F3F5;
+              --muted: #90949C;
             }
-            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, sans-serif; user-select: none; }
-            body {
-              background-color: var(--bg);
-              background-image: radial-gradient(#1c202b 1px, transparent 1px);
-              background-size: 16px 16px;
-              color: var(--txt);
-              padding: 12px;
-              padding-bottom: 80px;
-            }
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: Roboto, -apple-system, sans-serif; user-select: none; }
+            body { background: var(--bg); color: var(--text); padding: 14px; padding-bottom: 80px; }
             .hidden { display: none !important; }
-            .cut { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }
 
-            /* LOGIN GATE */
-            .gate { position: fixed; inset: 0; background: #090A0F; z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
-            .gate-box { width: 100%; max-width: 370px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--red); padding: 20px; }
-            .brand { font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; }
-            .brand span { color: var(--red); }
-            .tag { font-size: 9px; color: var(--sub); letter-spacing: 3px; margin: 4px 0 16px; font-family: monospace; }
-            .shz-box { background: var(--card); border: 1px solid var(--line); padding: 12px; margin-bottom: 12px; }
-            .row-sb { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 11px; }
-            .badge { font-size: 10px; font-family: monospace; padding: 2px 7px; background: #2b1116; color: var(--red); border: 1px solid var(--red); font-weight: 700; }
-            .badge.ok { background: #0d291a; color: var(--green); border-color: var(--green); }
-            .btn-red { width: 100%; background: var(--red); color: #fff; border: none; padding: 10px; font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
-            .hwid-bar { background: #06070a; border: 1px solid var(--line); padding: 8px 10px; font-size: 11px; font-family: monospace; color: var(--sub); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-            .inp { width: 100%; background: #06070a; border: 1px solid var(--line); color: #fff; padding: 11px; font-size: 12px; font-family: monospace; text-align: center; margin-bottom: 12px; outline: none; }
-            .inp:focus { border-color: var(--red); }
+            /* LAYAR MASUK (SHIZUKU & KEY) */
+            .login-wrap { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
+            .login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+            .app-name { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+            .app-ver { font-size: 12px; color: var(--muted); margin-top: 2px; margin-bottom: 16px; }
+            .section-box { background: #141619; border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+            .row-between { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 8px; }
+            .status-pill { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #331B1B; color: #EF5350; font-weight: 600; }
+            .status-pill.ok { background: #1B3320; color: #66BB6A; }
+            .btn { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 11px; font-size: 13px; font-weight: 600; cursor: pointer; }
+            .btn-secondary { background: #262930; color: var(--text); border: 1px solid var(--border); }
+            .input-field { width: 100%; background: #141619; border: 1px solid var(--border); border-radius: 6px; color: #fff; padding: 11px; font-size: 13px; margin-bottom: 12px; outline: none; }
+            .input-field:focus { border-color: var(--accent); }
 
-            /* TOP HEADER */
-            .top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 12px; }
-            .btn-rst { background: #1c1f2b; color: var(--red); border: 1px solid var(--red); padding: 6px 10px; font-size: 10px; font-weight: 800; font-family: monospace; }
+            /* HEADER */
+            .top-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+            .btn-small { background: #262930; color: #EF5350; border: 1px solid #3E2723; padding: 6px 10px; border-radius: 5px; font-size: 11px; font-weight: 600; }
 
-            /* TELEMETRY BAR */
-            .tele { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-            .tele-box { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--red); padding: 8px 10px; }
-            .tele-lbl { font-size: 9px; color: var(--sub); font-family: monospace; letter-spacing: 1px; }
-            .tele-val { font-size: 13px; font-weight: 800; margin-top: 2px; color: var(--green); font-family: monospace; }
+            /* INFO BAR */
+            .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+            .info-item { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+            .info-label { font-size: 11px; color: var(--muted); }
+            .info-val { font-size: 13px; font-weight: 700; color: var(--active-light); margin-top: 2px; }
 
-            /* GRID MODULES */
-            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 12px; }
-            .card { background: var(--card); border: 1px solid var(--line); padding: 11px; display: flex; flex-direction: column; justify-content: space-between; min-height: 112px; position: relative; }
-            .card::before { content: ""; position: absolute; top: 0; left: 0; width: 3px; height: 100%; background: #2c3242; }
-            .card.on { border-color: #2c4a38; background: linear-gradient(160deg, #161922 50%, #0e2418 100%); }
-            .card.on::before { background: var(--green); box-shadow: 0 0 8px var(--green); }
-            .c-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 4px; }
-            .c-id { font-size: 9px; font-family: monospace; color: var(--red); font-weight: 700; }
-            .c-title { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; margin: 2px 0; }
-            .c-desc { font-size: 10px; color: var(--sub); line-height: 1.25; }
+            /* LIST FITUR */
+            .module-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+            .module-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
+            .module-card.active { border-color: var(--active-light); }
+            .module-top { display: flex; justify-content: space-between; align-items: center; }
+            .module-title { font-size: 14px; font-weight: 600; }
+            .module-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-            /* TACTICAL SWITCH */
-            .sw { position: relative; width: 36px; height: 18px; flex-shrink: 0; }
-            .sw input { opacity: 0; width: 0; height: 0; }
-            .sl { position: absolute; inset: 0; background: #0b0d12; border: 1px solid var(--line); transition: .15s; }
-            .sl:before { position: absolute; content: ""; height: 12px; width: 12px; left: 2px; bottom: 2px; background: var(--sub); transition: .15s; }
-            input:checked + .sl { border-color: var(--green); background: #0a2215; }
-            input:checked + .sl:before { transform: translateX(18px); background: var(--green); }
+            /* SWITCH */
+            .switch { position: relative; width: 42px; height: 22px; flex-shrink: 0; }
+            .switch input { opacity: 0; width: 0; height: 0; }
+            .slider { position: absolute; inset: 0; background: #2E323B; border-radius: 22px; transition: 0.15s; }
+            .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background: #B0B5BD; border-radius: 50%; transition: 0.15s; }
+            input:checked + .slider { background: var(--active); }
+            input:checked + .slider:before { transform: translateX(20px); background: #fff; }
 
-            .c-foot { margin-top: 8px; display: flex; justify-content: flex-end; }
-            .btn-act { background: #1e222f; border: 1px solid #32384c; color: var(--txt); font-size: 10px; font-family: monospace; font-weight: 700; padding: 5px 10px; width: 100%; text-align: center; }
-            .btn-act.on { background: #0d291a; border-color: var(--green); color: var(--green); }
+            /* KONTROL TAMBAHAN */
+            .sub-control { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+            .step-box { display: flex; align-items: center; gap: 12px; }
+            .step-btn { background: #262930; color: #fff; border: 1px solid var(--border); width: 30px; height: 28px; border-radius: 4px; font-weight: 700; }
+            .select-box { width: 100%; background: #141619; color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; font-size: 12px; outline: none; }
 
-            /* SENSI & SELECT */
-            .s-box { display: flex; justify-content: space-between; align-items: center; width: 100%; background: #0b0d12; border: 1px solid var(--line); padding: 2px; }
-            .s-btn { background: #1e222f; color: #fff; border: none; width: 26px; height: 22px; font-weight: 900; }
-            .sel { width: 100%; background: #0b0d12; color: var(--green); border: 1px solid var(--line); padding: 5px; font-size: 10px; font-family: monospace; font-weight: 700; outline: none; }
+            /* PANEL DEVELOPER KEY */
+            .dev-panel { background: var(--surface); border: 1px solid var(--accent); border-radius: 6px; padding: 12px; margin-bottom: 14px; }
+            .dev-header { font-size: 13px; font-weight: 700; color: #EF5350; margin-bottom: 10px; display: flex; justify-content: space-between; }
+            .key-row { background: #141619; border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; margin-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+            .tag-btn { background: #262930; color: #fff; border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 10px; margin-left: 4px; }
+            .tag-btn.danger { background: #B71C1C; border-color: #D32F2F; }
 
-            /* CONSOLE LOG & LAUNCHER */
-            .console { background: #06070a; border: 1px solid var(--line); padding: 8px 10px; font-family: monospace; font-size: 10px; color: var(--green); margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .btn-launch { width: 100%; background: var(--red); color: #fff; border: none; padding: 13px; font-size: 13px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
-
-            /* ADMIN PANEL */
-            .adm { background: var(--panel); border: 1px solid var(--red); padding: 12px; margin-bottom: 12px; }
-            .adm-t { font-size: 11px; font-family: monospace; color: var(--red); font-weight: 800; margin-bottom: 8px; display: flex; justify-content: space-between; }
-            .k-row { background: var(--card); border: 1px solid var(--line); padding: 7px 9px; margin-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 10px; font-family: monospace; }
-            .k-btn { background: #262b3b; color: #fff; border: none; padding: 4px 7px; font-size: 9px; font-family: monospace; margin-left: 4px; }
-            .k-btn.stop { background: var(--red); }
-
-            /* BOTTOM BAR */
-            .nav { position: fixed; bottom: 0; left: 0; right: 0; height: 52px; background: #0c0e14; border-top: 1px solid var(--line); display: flex; justify-content: space-around; align-items: center; z-index: 90; }
-            .n-it { font-size: 10px; font-family: monospace; color: var(--sub); text-transform: uppercase; letter-spacing: 1px; padding: 8px; }
-            .n-it.act { color: var(--red); font-weight: 900; border-bottom: 2px solid var(--red); }
+            /* STATUS BAWAH */
+            .status-box { background: #141619; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+            .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 54px; background: var(--surface); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; z-index: 90; }
+            .nav-btn { font-size: 12px; color: var(--muted); font-weight: 500; padding: 8px 12px; }
+            .nav-btn.active { color: var(--text); font-weight: 700; border-bottom: 2px solid var(--accent); }
           </style>
           </head>
           <body>
 
-            <!-- LOGIN GATE -->
-            <div class="gate" id="gate">
-              <div class="gate-box cut">
-                <div class="brand">DANZ<span>STRAIGHT</span></div>
-                <div class="tag">SYS.KERNEL // SHIZUKU ADB ENGINE V5.5</div>
+            <!-- GERBANG AWAL: SHIZUKU & LISENSI 1 KEY 1 DEVICE -->
+            <div class="login-wrap" id="login-screen">
+              <div class="login-card">
+                <div class="app-name">DANZSTRAIGHT</div>
+                <div class="app-ver">System Tweaker & Shizuku Injector v6.0</div>
 
-                <div class="shz-box">
-                  <div class="row-sb">
-                    <span>SHIZUKU BINDER</span>
-                    <span class="badge" id="shz-st">DISCONNECTED</span>
+                <div class="section-box">
+                  <div class="row-between">
+                    <span>Akses Shizuku ADB</span>
+                    <span class="status-pill" id="shz-pill">Belum Aktif</span>
                   </div>
-                  <button class="btn-red cut" onclick="AndroidBridge.connectShizuku()">AUTHORIZE SHIZUKU ACCESS</button>
+                  <button class="btn btn-secondary" onclick="AndroidBridge.connectShizuku()">Hubungkan Shizuku</button>
                 </div>
 
-                <div class="hwid-bar">
-                  <span>HWID: <b id="hwid-val" style="color:#fff">...</b></span>
-                  <button class="k-btn" onclick="AndroidBridge.copyText(myHwid)">COPY</button>
+                <div class="section-box">
+                  <div class="row-between" style="margin:0">
+                    <span>ID Perangkat: <b id="hwid-label">...</b></span>
+                    <button class="tag-btn" onclick="AndroidBridge.copyText(myHwid)">Salin</button>
+                  </div>
                 </div>
 
-                <input type="text" class="inp" id="k-inp" placeholder="ENTER LICENSE KEY (1-KEY 1-DEVICE)">
-                <button class="btn-red cut" onclick="loginKey()">INITIALIZE SYSTEM</button>
+                <input type="text" class="input-field" id="key-input" placeholder="Masukkan Kode Lisensi (1 Key 1 HP)">
+                <button class="btn" onclick="verifyKey()">Masuk Aplikasi</button>
               </div>
             </div>
 
-            <!-- HEADER -->
-            <div class="top">
+            <!-- HEADER UTAMA -->
+            <div class="top-bar">
               <div>
-                <div class="brand">DANZ<span>STRAIGHT</span></div>
-                <div class="tag" style="margin:0">TACTICAL ANDROID INJECTOR // V5.5</div>
+                <div class="app-name">DANZSTRAIGHT</div>
+                <div style="font-size:11px;color:var(--muted)">Shizuku In-Game Configuration</div>
               </div>
-              <button class="btn-rst" onclick="AndroidBridge.resetDisplay()">RESET DISPLAY</button>
+              <button class="btn-small" onclick="AndroidBridge.resetAll()">Reset Normal</button>
             </div>
 
-            <!-- TELEMETRY -->
-            <div class="tele">
-              <div class="tele-box">
-                <div class="tele-lbl">ADB PRIVILEGE</div>
-                <div class="tele-val">SHIZUKU ACTIVE</div>
+            <div class="info-grid">
+              <div class="info-item">
+                <div class="info-label">Status Engine</div>
+                <div class="info-val">Shizuku Terhubung</div>
               </div>
-              <div class="tele-box">
-                <div class="tele-lbl">FRAME & TOUCH</div>
-                <div class="tele-val" id="fps-txt">120HZ // UNLOCKED</div>
+              <div class="info-item">
+                <div class="info-label">Mode Performa</div>
+                <div class="info-val" id="perf-label">Siap Digunakan</div>
               </div>
             </div>
 
-            <!-- ADMIN KEY MANAGER -->
-            <div class="adm hidden" id="adm-box">
-              <div class="adm-t"><span>[DEV] LICENSE CONTROL UNIT</span><span>1 KEY = 1 HWID</span></div>
-              <div style="display:flex;gap:6px;margin-bottom:6px">
-                <input type="text" class="inp" id="new-k" placeholder="Custom Key (Blank=Auto)" style="margin:0;text-align:left">
-                <button class="btn-red" style="width:auto;padding:0 12px" onclick="createKey()">CREATE</button>
+            <!-- PANEL KHUSUS DEVELOPER (CREATE KEY & STOP KEY) -->
+            <div class="dev-panel hidden" id="dev-panel">
+              <div class="dev-header">
+                <span>Manajemen Lisensi Developer</span>
+                <span>1 Key = 1 HP</span>
               </div>
-              <input type="text" class="inp" id="new-hwid" placeholder="Optional: Lock to Target HWID" style="margin:0;text-align:left">
-              <div id="k-list"></div>
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <input type="text" class="input-field" id="custom-key" placeholder="Nama Key (Kosong = Otomatis)" style="margin:0">
+                <button class="btn" style="width:auto;padding:0 14px" onclick="createNewKey()">Buat Key</button>
+              </div>
+              <input type="text" class="input-field" id="target-hwid" placeholder="Opsional: Kunci langsung ke ID Perangkat" style="margin:0">
+              <div id="key-list"></div>
             </div>
 
-            <!-- 8 TACTICAL MODULES -->
-            <div class="grid">
-              <div class="card cut" id="c-1">
-                <div class="c-head">
-                  <div><div class="c-id">MOD // 01</div><div class="c-title">Aim Legit</div><div class="c-desc">Natural recoil & pointer stabilization</div></div>
-                  <label class="sw"><input type="checkbox" id="sw-1" onchange="trig(1,'AIM_LEGIT')"><span class="sl"></span></label>
+            <!-- DAFTAR FITUR IN-GAME -->
+            <div class="module-list">
+
+              <!-- 1. Aim Merah / Drag HS -->
+              <div class="module-card" id="card-1">
+                <div class="module-top">
+                  <div>
+                    <div class="module-title">Aim Merah (Drag HS)</div>
+                    <div class="module-desc">Kecepatan pointer maksimum (+7) & penghapus jeda tekan tombol tembak</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="sw-1" onchange="toggleMod(1,'Aim Merah')"><span class="slider"></span></label>
                 </div>
-                <div class="c-foot"><button class="btn-act" id="b-1" onclick="btn(1,'AIM_LEGIT')">EXECUTE</button></div>
               </div>
 
-              <div class="card cut" id="c-2">
-                <div class="c-head">
-                  <div><div class="c-id">MOD // 02</div><div class="c-title">Aim Trick</div><div class="c-desc">Zero window transition & fast flick</div></div>
-                  <label class="sw"><input type="checkbox" id="sw-2" onchange="trig(2,'AIM_TRICK')"><span class="sl"></span></label>
+              <!-- 2. Easy Drag -->
+              <div class="module-card" id="card-2">
+                <div class="module-top">
+                  <div>
+                    <div class="module-title">Easy Drag</div>
+                    <div class="module-desc">Percepat respons multi-sentuhan (100ms) & peringan tarikan vertikal</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="sw-2" onchange="toggleMod(2,'Easy Drag')"><span class="slider"></span></label>
                 </div>
-                <div class="c-foot"><button class="btn-act" id="b-2" onclick="btn(2,'AIM_TRICK')">EXECUTE</button></div>
               </div>
 
-              <div class="card cut" id="c-3">
-                <div class="c-head">
-                  <div><div class="c-id">MOD // 03</div><div class="c-title">Drag HS</div><div class="c-desc">Max pointer velocity (+7) & 130ms tap</div></div>
-                  <label class="sw"><input type="checkbox" id="sw-3" onchange="trig(3,'DRAG_HS')"><span class="sl"></span></label>
+              <!-- 3. Smooth Aim -->
+              <div class="module-card" id="card-3">
+                <div class="module-top">
+                  <div>
+                    <div class="module-title">Smooth Aim</div>
+                    <div class="module-desc">Kunci kestabilan frame layar & hilangkan patah-patah saat mengarahkan bidikan</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="sw-3" onchange="toggleMod(3,'Smooth Aim')"><span class="slider"></span></label>
                 </div>
-                <div class="c-foot"><button class="btn-act" id="b-3" onclick="btn(3,'DRAG_HS')">EXECUTE</button></div>
               </div>
 
-              <!-- NEW: EASY DRAG -->
-              <div class="card cut" id="c-7">
-                <div class="c-head">
-                  <div><div class="c-id">MOD // 04</div><div class="c-title">Easy Drag</div><div class="c-desc">100ms multi-press & low drag friction</div></div>
-                  <label class="sw"><input type="checkbox" id="sw-7" onchange="trig(7,'EASY_DRAG')"><span class="sl"></span></label>
+              <!-- 4. Aim Legit -->
+              <div class="module-card" id="card-4">
+                <div class="module-top">
+                  <div>
+                    <div class="module-title">Aim Legit</div>
+                    <div class="module-desc">Kalibrasi titik sentuh agar bidikan lurus dan tidak goyang di kepala</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="sw-4" onchange="toggleMod(4,'Aim Legit')"><span class="slider"></span></label>
                 </div>
-                <div class="c-foot"><button class="btn-act" id="b-7" onclick="btn(7,'EASY_DRAG')">EXECUTE</button></div>
               </div>
 
-              <!-- NEW: SMOOTH AIM -->
-              <div class="card cut" id="c-8">
-                <div class="c-head">
-                  <div><div class="c-id">MOD // 05</div><div class="c-title">Smooth Aim</div><div class="c-desc">Unsignaled buffer latch & steady crosshair</div></div>
-                  <label class="sw"><input type="checkbox" id="sw-8" onchange="trig(8,'SMOOTH_AIM')"><span class="sl"></span></label>
+              <!-- 5. Sensitivitas DPI -->
+              <div class="module-card" id="card-5">
+                <div class="module-top">
+                  <div>
+                    <div class="module-title">Sensitivitas Layar</div>
+                    <div class="module-desc">Atur kelicinan layar dan skala DPI otomatis (Level 1 - 7)</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="sw-5" onchange="toggleMod(5,'Sensitivitas')"><span class="slider"></span></label>
                 </div>
-                <div class="c-foot"><button class="btn-act" id="b-8" onclick="btn(8,'SMOOTH_AIM')">EXECUTE</button></div>
-              </div>
-
-              <div class="card cut" id="c-4">
-                <div class="c-head">
-                  <div><div class="c-id">MOD // 06</div><div class="c-title">Sensivity</div><div class="c-desc">Gamelan scale 1-7 + DPI matrix</div></div>
-                  <label class="sw"><input type="checkbox" id="sw-4" onchange="trig(4,'SENSIVITY')"><span class="sl"></span></label>
-                </div>
-                <div class="c-foot">
-                  <div class="s-box">
-                    <button class="s-btn" onclick="chSensi(-1)">-</button>
-                    <span id="s-num" style="font-family:monospace;font-weight:800;font-size:12px">4</span>
-                    <button class="s-btn" onclick="chSensi(1)">+</button>
+                <div class="sub-control">
+                  <span style="font-size:12px;color:var(--muted)">Tingkat Kelicinan:</span>
+                  <div class="step-box">
+                    <button class="step-btn" onclick="changeSensi(-1)">-</button>
+                    <b id="sensi-val" style="font-size:13px">4</b>
+                    <button class="step-btn" onclick="changeSensi(1)">+</button>
                   </div>
                 </div>
               </div>
 
-              <div class="card cut" id="c-5">
-                <div class="c-head">
-                  <div><div class="c-id">MOD // 07</div><div class="c-title">Boost HP</div><div class="c-desc">Purge background tasks & lock 120Hz</div></div>
-                  <label class="sw"><input type="checkbox" id="sw-5" onchange="trig(5,'BOOST_HP')"><span class="sl"></span></label>
+              <!-- 6. Boost Performa -->
+              <div class="module-card" id="card-6">
+                <div class="module-top">
+                  <div>
+                    <div class="module-title">Boost HP & Kunci FPS</div>
+                    <div class="module-desc">Hentikan aplikasi latar belakang, bersihkan cache & aktifkan Game Mode</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="sw-6" onchange="toggleMod(6,'Boost Performa')"><span class="slider"></span></label>
                 </div>
-                <div class="c-foot"><button class="btn-act" id="b-5" onclick="btn(5,'BOOST_HP')">EXECUTE</button></div>
               </div>
 
-              <div class="card cut" id="c-6">
-                <div class="c-head">
-                  <div><div class="c-id">MOD // 08</div><div class="c-title">Graphic MC</div><div class="c-desc">Hardware downscale & renderer</div></div>
-                  <label class="sw"><input type="checkbox" id="sw-6" onchange="trig(6,'GRAPHIC_MC')"><span class="sl"></span></label>
+              <!-- 7. GRAFIK RINGAN (2 Mode) -->
+              <div class="module-card" id="card-7">
+                <div class="module-top">
+                  <div>
+                    <div class="module-title">Grafik Ringan</div>
+                    <div class="module-desc">Turunkan beban render tekstur in-game Free Fire via Shizuku</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="sw-7" onchange="toggleMod(7,'Grafik Ringan')"><span class="slider"></span></label>
                 </div>
-                <div class="c-foot">
-                  <select class="sel" id="mc-sel" onchange="document.getElementById('sw-6').checked=true;trig(6,'GRAPHIC_MC')">
-                    <option value="1">1. MINECRAFT</option>
-                    <option value="2">2. BURIK PC</option>
+                <div class="sub-control">
+                  <select class="select-box" id="light-mode" onchange="document.getElementById('sw-7').checked=true;toggleMod(7,'Grafik Ringan')">
+                    <option value="1">Mode 1: Super Ringan (Tekstur Polos / FPS Tinggi)</option>
+                    <option value="2">Mode 2: Burik PC (Resolusi Lebar Emulator)</option>
                   </select>
                 </div>
               </div>
+
             </div>
 
-            <!-- TERMINAL LOG & LAUNCH -->
-            <div class="console" id="log-box">> SYS_READY: WAITING FOR MODULE EXECUTION...</div>
-            <button class="btn-launch cut" onclick="AndroidBridge.launchFF()">LAUNCH FREE FIRE // EXECUTE</button>
+            <div class="status-box" id="status-log">Status: Menunggu perintah...</div>
+            <button class="btn" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire Sekarang</button>
 
-            <!-- BOTTOM NAV -->
-            <div class="nav">
-              <div class="n-it act" onclick="window.scrollTo(0,0)">MODULES</div>
-              <div class="n-it hidden" id="nav-adm" onclick="document.getElementById('adm-box').classList.toggle('hidden')">KEY ADMIN</div>
-              <div class="n-it" onclick="AndroidBridge.resetDisplay()">RESTORE</div>
-              <div class="n-it" onclick="AndroidBridge.launchFF()">LAUNCH</div>
+            <div class="bottom-bar">
+              <div class="nav-btn active" onclick="window.scrollTo(0,0)">Menu Utama</div>
+              <div class="nav-btn hidden" id="nav-dev" onclick="document.getElementById('dev-panel').classList.toggle('hidden')">Panel Key</div>
+              <div class="nav-btn" onclick="AndroidBridge.resetAll()">Reset Normal</div>
+              <div class="nav-btn" onclick="AndroidBridge.launchFreeFire()">Buka Game</div>
             </div>
 
             <script>
-              const MASTER_KEY = "DANZ-DEV-999";
+              const DEV_KEY = "DANZ-DEV-999";
               let myHwid = window.AndroidBridge ? AndroidBridge.getHwid() : "HWID-01";
-              let shzOk = false;
+              let shizukuOk = false;
               let sensi = 4;
 
-              document.getElementById('hwid-val').innerText = myHwid;
+              document.getElementById('hwid-label').innerText = myHwid;
 
-              function onShizukuReady(ok) {
-                shzOk = ok;
-                const el = document.getElementById('shz-st');
-                if (ok) { el.innerText = "AUTHORIZED"; el.classList.add('ok'); }
-              }
-
-              function getDb() {
-                const r = localStorage.getItem('danz_v5_db');
-                if (!r) {
-                  const d = [{ key: "DANZ-VIP-001", hwid: "", status: "ACTIVE" }];
-                  localStorage.setItem('danz_v5_db', JSON.stringify(d));
-                  return d;
+              function setShizukuStatus(ok) {
+                shizukuOk = ok;
+                const p = document.getElementById('shz-pill');
+                if (ok) {
+                  p.innerText = "Terhubung";
+                  p.classList.add('ok');
                 }
-                return JSON.parse(r);
               }
 
-              function saveDb(d) {
-                localStorage.setItem('danz_v5_db', JSON.stringify(d));
-                renderKeys();
+              function getKeys() {
+                const raw = localStorage.getItem('danz_v6_keys');
+                if (!raw) {
+                  const def = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
+                  localStorage.setItem('danz_v6_keys', JSON.stringify(def));
+                  return def;
+                }
+                return JSON.parse(raw);
               }
 
-              function loginKey() {
-                if (!shzOk) {
-                  AndroidBridge.toast("Authorize Shizuku first!");
+              function saveKeys(list) {
+                localStorage.setItem('danz_v6_keys', JSON.stringify(list));
+                renderKeyList();
+              }
+
+              function verifyKey() {
+                if (!shizukuOk) {
+                  AndroidBridge.toast("Hubungkan dan izinkan Shizuku terlebih dahulu");
                   AndroidBridge.connectShizuku();
                   return;
                 }
-                const k = document.getElementById('k-inp').value.trim().toUpperCase();
-                if (!k) { AndroidBridge.toast("Enter License Key!"); return; }
+                const k = document.getElementById('key-input').value.trim().toUpperCase();
+                if (!k) { AndroidBridge.toast("Masukkan kode lisensi"); return; }
 
-                if (k === MASTER_KEY) {
-                  document.getElementById('gate').classList.add('hidden');
-                  document.getElementById('nav-adm').classList.remove('hidden');
-                  document.getElementById('adm-box').classList.remove('hidden');
-                  renderKeys();
+                if (k === DEV_KEY) {
+                  document.getElementById('login-screen').classList.add('hidden');
+                  document.getElementById('nav-dev').classList.remove('hidden');
+                  document.getElementById('dev-panel').classList.remove('hidden');
+                  renderKeyList();
                   return;
                 }
 
-                let db = getDb();
-                let item = db.find(x => x.key === k);
+                let list = getKeys();
+                let item = list.find(x => x.key === k);
                 if (!item && k.startsWith("DANZ-KEY-")) {
-                  item = { key: k, hwid: myHwid, status: "ACTIVE" };
-                  db.push(item);
+                  item = { key: k, hwid: myHwid, status: "AKTIF" };
+                  list.push(item);
                 }
-                if (!item) { AndroidBridge.toast("INVALID KEY"); return; }
-                if (item.status !== "ACTIVE") { AndroidBridge.toast("KEY STOPPED BY DEVELOPER"); return; }
+                if (!item) { AndroidBridge.toast("Kode lisensi tidak terdaftar"); return; }
+                if (item.status !== "AKTIF") { AndroidBridge.toast("Lisensi ini telah dinonaktifkan oleh Developer"); return; }
                 if (item.hwid && item.hwid !== "" && item.hwid !== myHwid) {
-                  AndroidBridge.toast("HWID LOCKED TO ANOTHER DEVICE");
+                  AndroidBridge.toast("Lisensi sudah terikat di perangkat lain (1 Key 1 HP)");
                   return;
                 }
                 item.hwid = myHwid;
-                saveDb(db);
-                document.getElementById('gate').classList.add('hidden');
+                saveKeys(list);
+                document.getElementById('login-screen').classList.add('hidden');
               }
 
-              function createKey() {
-                let c = document.getElementById('new-k').value.trim().toUpperCase();
-                let h = document.getElementById('new-hwid').value.trim().toUpperCase();
+              function createNewKey() {
+                let c = document.getElementById('custom-key').value.trim().toUpperCase();
+                let h = document.getElementById('target-hwid').value.trim().toUpperCase();
                 let r = Math.random().toString(36).substring(2, 6).toUpperCase();
                 let k = c ? c : ("DANZ-KEY-" + r);
-                let db = getDb();
-                db.unshift({ key: k, hwid: h, status: "ACTIVE" });
-                saveDb(db);
+                let list = getKeys();
+                list.unshift({ key: k, hwid: h, status: "AKTIF" });
+                saveKeys(list);
+                document.getElementById('custom-key').value = "";
                 AndroidBridge.copyText(k);
               }
 
-              function stopKey(k) {
-                let db = getDb();
-                let it = db.find(x => x.key === k);
-                if (it) { it.status = (it.status === "ACTIVE") ? "STOPPED" : "ACTIVE"; saveDb(db); }
+              function toggleKeyStatus(k) {
+                let list = getKeys();
+                let it = list.find(x => x.key === k);
+                if (it) {
+                  it.status = (it.status === "AKTIF") ? "BERHENTI" : "AKTIF";
+                  saveKeys(list);
+                }
               }
 
-              function renderKeys() {
-                document.getElementById('k-list').innerHTML = getDb().map(x => `
-                  <div class="k-row">
-                    <div><b style="color:#00FF66">${x.key}</b><br><span style="color:#7C8496">HWID: ${x.hwid || 'UNBOUND'} | ${x.status}</span></div>
+              function resetHwid(k) {
+                let list = getKeys();
+                let it = list.find(x => x.key === k);
+                if (it) {
+                  it.hwid = "";
+                  saveKeys(list);
+                  AndroidBridge.toast("ID Perangkat direset untuk " + k);
+                }
+              }
+
+              function renderKeyList() {
+                document.getElementById('key-list').innerHTML = getKeys().map(x => `
+                  <div class="key-row">
                     <div>
-                      <button class="k-btn" onclick="AndroidBridge.copyText('${x.key}')">COPY</button>
-                      <button class="k-btn stop" onclick="stopKey('${x.key}')">${x.status === 'ACTIVE' ? 'STOP' : 'ENABLE'}</button>
+                      <b>${x.key}</b>
+                      <div style="color:var(--muted)">HP: ${x.hwid || 'Belum Terikat'} | Status: ${x.status}</div>
+                    </div>
+                    <div>
+                      <button class="tag-btn" onclick="AndroidBridge.copyText('${x.key}')">Salin</button>
+                      <button class="tag-btn" onclick="resetHwid('${x.key}')">Reset HP</button>
+                      <button class="tag-btn danger" onclick="toggleKeyStatus('${x.key}')">${x.status === 'AKTIF' ? 'Stop Key' : 'Aktifkan'}</button>
                     </div>
                   </div>
                 `).join('');
               }
 
-              function chSensi(d) {
+              function changeSensi(d) {
                 sensi = Math.min(7, Math.max(1, sensi + d));
-                document.getElementById('s-num').innerText = sensi;
-                document.getElementById('sw-4').checked = true;
-                trig(4, 'SENSIVITY_LV' + sensi);
+                document.getElementById('sensi-val').innerText = sensi;
+                document.getElementById('sw-5').checked = true;
+                toggleMod(5, 'Sensitivitas Lv.' + sensi);
               }
 
-              function btn(id, name) {
-                const s = document.getElementById('sw-' + id);
-                s.checked = !s.checked;
-                trig(id, name);
-              }
-
-              function trig(id, name) {
-                const s = document.getElementById('sw-' + id);
-                const c = document.getElementById('c-' + id);
-                const b = document.getElementById('b-' + id);
-                const mc = parseInt(document.getElementById('mc-sel').value || "1");
-                if (s.checked) {
-                  c.classList.add('on');
-                  if (b) { b.innerText = "ACTIVE"; b.classList.add('on'); }
-                  const out = AndroidBridge.runModule(id, name, true, sensi, mc);
-                  document.getElementById('log-box').innerText = "> " + out;
+              function toggleMod(id, name) {
+                const sw = document.getElementById('sw-' + id);
+                const card = document.getElementById('card-' + id);
+                const mode = parseInt(document.getElementById('light-mode').value || "1");
+                if (sw.checked) {
+                  card.classList.add('active');
+                  const res = AndroidBridge.runFeature(id, name, true, sensi, mode);
+                  document.getElementById('status-log').innerText = "Status: " + res;
+                  document.getElementById('perf-label').innerText = "Injeksi Aktif";
                 } else {
-                  c.classList.remove('on');
-                  if (b) { b.innerText = "EXECUTE"; b.classList.remove('on'); }
-                  const out = AndroidBridge.runModule(id, name, false, sensi, 0);
-                  document.getElementById('log-box').innerText = "> " + out;
+                  card.classList.remove('active');
+                  const res = AndroidBridge.runFeature(id, name, false, sensi, 0);
+                  document.getElementById('status-log').innerText = "Status: " + res;
                 }
               }
             </script>
@@ -667,8 +808,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload Tactical V5 APK
+      - name: Upload DANZSTRAIGHT V6 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V5-TACTICAL
+          name: DANZSTRAIGHT-V6-CLEAN
           path: clean_apk/app/build/outputs/apk/debug/*.apk
