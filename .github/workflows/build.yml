@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V11 True Texture & Licin Sensi
+name: Build DANZSTRAIGHT V13 Direct FF Graphics & Auto-Aim
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V11 APK
+      - name: Build DANZSTRAIGHT V13 APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -39,7 +39,6 @@ jobs:
           include ":app"
           EOF
 
-          # WAJIB: useLegacyPackaging = true agar file .so diekstrak ke folder sistem dan terbaca oleh Free Fire
           cat << 'EOF' > clean_apk/app/build.gradle
           plugins { id "com.android.application" version "8.2.0" }
           android { 
@@ -49,8 +48,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 110
-              versionName "11.0"
+              versionCode 130
+              versionName "13.0"
               ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
             }
             packagingOptions {
@@ -72,237 +71,90 @@ jobs:
           }
           EOF
 
-          # 1. Merakit 4 Library OpenGL ES Layer Terpisah (Bebas Blokir SELinux setprop)
           cat << 'EOF' > clean_apk/app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.18.1)
           project("danz_mc")
 
-          add_library(mc_ringan SHARED danz_mc_layer.cpp)
-          target_compile_definitions(mc_ringan PRIVATE MC_BASE_LVL=2 MC_LOD=2.5f MC_SHARP=0)
-          target_link_libraries(mc_ringan GLESv2 GLESv3 log)
-
-          add_library(mc_retro SHARED danz_mc_layer.cpp)
-          target_compile_definitions(mc_retro PRIVATE MC_BASE_LVL=4 MC_LOD=4.5f MC_SHARP=1)
-          target_link_libraries(mc_retro GLESv2 GLESv3 log)
-
-          add_library(mc_kotak SHARED danz_mc_layer.cpp)
-          target_compile_definitions(mc_kotak PRIVATE MC_BASE_LVL=6 MC_LOD=6.5f MC_SHARP=1)
-          target_link_libraries(mc_kotak GLESv2 GLESv3 log)
-
           add_library(mc_ekstrem SHARED danz_mc_layer.cpp)
-          target_compile_definitions(mc_ekstrem PRIVATE MC_BASE_LVL=9 MC_LOD=9.5f MC_SHARP=1)
+          target_compile_definitions(mc_ekstrem PRIVATE MC_BASE_LVL=8 MC_LOD=8.5f MC_SHARP=1)
           target_link_libraries(mc_ekstrem GLESv2 GLESv3 log)
           EOF
 
-          # 2. Mesin C++ OpenGL ES 3.0 Hook Khusus Unity Engine Free Fire (glTexStorage2D & glBindSampler)
           cat << 'EOF' > clean_apk/app/src/main/cpp/danz_mc_layer.cpp
           #include <GLES2/gl2.h>
           #include <GLES3/gl3.h>
           #include <string.h>
 
-          #ifndef MC_BASE_LVL
-          #define MC_BASE_LVL 6
-          #endif
-          #ifndef MC_LOD
-          #define MC_LOD 6.5f
-          #endif
-          #ifndef MC_SHARP
-          #define MC_SHARP 1
-          #endif
-
           #define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
-
           typedef void* (*PFNEGLGETNEXTLAYERPROCADDRESSPROC)(void*, const char*);
           typedef void (*PFN_glTexStorage2D)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
-          typedef void (*PFN_glCompressedTexImage2D)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void*);
-          typedef void (*PFN_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*);
           typedef void (*PFN_glTexParameteri)(GLenum, GLenum, GLint);
           typedef void (*PFN_glTexParameterf)(GLenum, GLenum, GLfloat);
           typedef void (*PFN_glSamplerParameteri)(GLuint, GLenum, GLint);
           typedef void (*PFN_glSamplerParameterf)(GLuint, GLenum, GLfloat);
-          typedef void (*PFN_glBindSampler)(GLuint, GLuint);
-          typedef void (*PFN_glGenerateMipmap)(GLenum);
 
           static PFN_glTexStorage2D real_glTexStorage2D = nullptr;
-          static PFN_glCompressedTexImage2D real_glCompressedTexImage2D = nullptr;
-          static PFN_glTexImage2D real_glTexImage2D = nullptr;
           static PFN_glTexParameteri real_glTexParameteri = nullptr;
           static PFN_glTexParameterf real_glTexParameterf = nullptr;
           static PFN_glSamplerParameteri real_glSamplerParameteri = nullptr;
           static PFN_glSamplerParameterf real_glSamplerParameterf = nullptr;
-          static PFN_glBindSampler real_glBindSampler = nullptr;
-          static PFN_glGenerateMipmap real_glGenerateMipmap = nullptr;
 
-          static void forceTextureMinecraft(GLenum target, int maxAvailLevel) {
-              if (target != GL_TEXTURE_2D || !real_glTexParameteri || !real_glTexParameterf) return;
-              int targetBase = (MC_BASE_LVL < maxAvailLevel) ? MC_BASE_LVL : maxAvailLevel;
-              if (targetBase < 1) return;
-
-              real_glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, targetBase);
-              real_glTexParameterf(target, GL_TEXTURE_MIN_LOD, (GLfloat)MC_LOD);
-              real_glTexParameterf(target, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
-              real_glTexParameteri(target, GL_TEXTURE_MAG_FILTER, MC_SHARP ? GL_NEAREST : GL_LINEAR);
-              real_glTexParameteri(target, GL_TEXTURE_MIN_FILTER, MC_SHARP ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_NEAREST);
-          }
-
-          // Unity Engine mengalokasikan semua tekstur 3D (bangunan, lantai, SG) lewat glTexStorage2D dengan levels > 1
           static void hook_glTexStorage2D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height) {
-              if (!real_glTexStorage2D) return;
-              real_glTexStorage2D(target, levels, internalformat, width, height);
-              if (target == GL_TEXTURE_2D && levels > 2) {
-                  forceTextureMinecraft(target, levels - 1);
-              }
-          }
-
-          static void hook_glCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void* data) {
-              if (!real_glCompressedTexImage2D) return;
-              real_glCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, data);
-              if (target == GL_TEXTURE_2D && level >= 2) {
-                  forceTextureMinecraft(target, level);
-              }
-          }
-
-          static void hook_glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void* pixels) {
-              if (!real_glTexImage2D) return;
-              real_glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
-              if (target == GL_TEXTURE_2D && level >= 2) {
-                  forceTextureMinecraft(target, level);
+              if (real_glTexStorage2D) real_glTexStorage2D(target, levels, internalformat, width, height);
+              if (target == GL_TEXTURE_2D && levels > 2 && real_glTexParameteri && real_glTexParameterf) {
+                  int base = (levels - 1 < 8) ? (levels - 1) : 8;
+                  real_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, base);
+                  real_glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 8.5f);
+                  real_glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
+                  real_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                  real_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
               }
           }
 
           static void hook_glTexParameteri(GLenum target, GLenum pname, GLint param) {
               if (!real_glTexParameteri) return;
               if (target == GL_TEXTURE_2D) {
-                  if (pname == GL_TEXTURE_MAG_FILTER) {
-                      param = MC_SHARP ? GL_NEAREST : GL_LINEAR;
-                  } else if (pname == GL_TEXTURE_MIN_FILTER) {
-                      if (param >= 0x2700 && param <= 0x2703) {
-                          param = MC_SHARP ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_NEAREST;
-                          if (real_glTexParameterf) {
-                              real_glTexParameterf(target, GL_TEXTURE_MIN_LOD, (GLfloat)MC_LOD);
-                              real_glTexParameterf(target, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
-                          }
-                      }
-                  } else if (pname == GL_TEXTURE_MAX_ANISOTROPY_EXT) {
-                      param = 1;
+                  if (pname == GL_TEXTURE_MAG_FILTER) param = GL_NEAREST;
+                  else if (pname == GL_TEXTURE_MIN_FILTER && param >= 0x2700 && param <= 0x2703) {
+                      param = GL_NEAREST_MIPMAP_NEAREST;
                   }
               }
               real_glTexParameteri(target, pname, param);
           }
 
-          static void hook_glTexParameterf(GLenum target, GLenum pname, GLfloat param) {
-              if (!real_glTexParameterf) return;
-              if (target == GL_TEXTURE_2D) {
-                  if (pname == GL_TEXTURE_MAX_ANISOTROPY_EXT) param = 1.0f;
-                  else if (pname == GL_TEXTURE_MIN_LOD && param < MC_LOD) param = (GLfloat)MC_LOD;
-              }
-              real_glTexParameterf(target, pname, param);
-          }
-
-          // Unity Engine menggunakan Sampler Object yang menimpa glTexParameter jika tidak di-hook
-          static void hook_glBindSampler(GLuint unit, GLuint sampler) {
-              if (!real_glBindSampler) return;
-              real_glBindSampler(unit, sampler);
-              if (sampler != 0 && real_glSamplerParameteri && real_glSamplerParameterf) {
-                  real_glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, MC_SHARP ? GL_NEAREST : GL_LINEAR);
-                  real_glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, MC_SHARP ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_NEAREST);
-                  real_glSamplerParameterf(sampler, GL_TEXTURE_MIN_LOD, (GLfloat)MC_LOD);
-                  real_glSamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
-              }
-          }
-
           static void hook_glSamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
               if (!real_glSamplerParameteri) return;
-              if (pname == GL_TEXTURE_MAG_FILTER) {
-                  param = MC_SHARP ? GL_NEAREST : GL_LINEAR;
-              } else if (pname == GL_TEXTURE_MIN_FILTER) {
-                  if (param >= 0x2700 && param <= 0x2703) {
-                      param = MC_SHARP ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_NEAREST;
-                      if (real_glSamplerParameterf) {
-                          real_glSamplerParameterf(sampler, GL_TEXTURE_MIN_LOD, (GLfloat)MC_LOD);
-                          real_glSamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
-                      }
-                  }
-              } else if (pname == GL_TEXTURE_MAX_ANISOTROPY_EXT) {
-                  param = 1;
+              if (pname == GL_TEXTURE_MAG_FILTER) param = GL_NEAREST;
+              else if (pname == GL_TEXTURE_MIN_FILTER && param >= 0x2700 && param <= 0x2703) {
+                  param = GL_NEAREST_MIPMAP_NEAREST;
+                  if (real_glSamplerParameterf) real_glSamplerParameterf(sampler, GL_TEXTURE_MIN_LOD, 8.5f);
               }
               real_glSamplerParameteri(sampler, pname, param);
-          }
-
-          static void hook_glSamplerParameterf(GLuint sampler, GLenum pname, GLfloat param) {
-              if (!real_glSamplerParameterf) return;
-              if (pname == GL_TEXTURE_MAX_ANISOTROPY_EXT) param = 1.0f;
-              else if (pname == GL_TEXTURE_MIN_LOD && param < MC_LOD) param = (GLfloat)MC_LOD;
-              real_glSamplerParameterf(sampler, pname, param);
-          }
-
-          static void hook_glGenerateMipmap(GLenum target) {
-              if (!real_glGenerateMipmap) return;
-              real_glGenerateMipmap(target);
-              if (target == GL_TEXTURE_2D) {
-                  forceTextureMinecraft(target, MC_BASE_LVL);
-              }
           }
 
           extern "C" __attribute__((visibility("default")))
           void AndroidGLESLayer_Initialize(void* layer_id, PFNEGLGETNEXTLAYERPROCADDRESSPROC get_next_proc) {
               real_glTexStorage2D = (PFN_glTexStorage2D)get_next_proc(layer_id, "glTexStorage2D");
-              real_glCompressedTexImage2D = (PFN_glCompressedTexImage2D)get_next_proc(layer_id, "glCompressedTexImage2D");
-              real_glTexImage2D = (PFN_glTexImage2D)get_next_proc(layer_id, "glTexImage2D");
               real_glTexParameteri = (PFN_glTexParameteri)get_next_proc(layer_id, "glTexParameteri");
               real_glTexParameterf = (PFN_glTexParameterf)get_next_proc(layer_id, "glTexParameterf");
               real_glSamplerParameteri = (PFN_glSamplerParameteri)get_next_proc(layer_id, "glSamplerParameteri");
               real_glSamplerParameterf = (PFN_glSamplerParameterf)get_next_proc(layer_id, "glSamplerParameterf");
-              real_glBindSampler = (PFN_glBindSampler)get_next_proc(layer_id, "glBindSampler");
-              real_glGenerateMipmap = (PFN_glGenerateMipmap)get_next_proc(layer_id, "glGenerateMipmap");
           }
 
           extern "C" __attribute__((visibility("default")))
           void* AndroidGLESLayer_GetProcAddress(const char* name, void* next) {
               if (!name) return next;
-              if (strcmp(name, "glTexStorage2D") == 0) {
-                  if (!real_glTexStorage2D) real_glTexStorage2D = (PFN_glTexStorage2D)next;
-                  return (void*)hook_glTexStorage2D;
-              }
-              if (strcmp(name, "glCompressedTexImage2D") == 0) {
-                  if (!real_glCompressedTexImage2D) real_glCompressedTexImage2D = (PFN_glCompressedTexImage2D)next;
-                  return (void*)hook_glCompressedTexImage2D;
-              }
-              if (strcmp(name, "glTexImage2D") == 0) {
-                  if (!real_glTexImage2D) real_glTexImage2D = (PFN_glTexImage2D)next;
-                  return (void*)hook_glTexImage2D;
-              }
-              if (strcmp(name, "glTexParameteri") == 0) {
-                  if (!real_glTexParameteri) real_glTexParameteri = (PFN_glTexParameteri)next;
-                  return (void*)hook_glTexParameteri;
-              }
-              if (strcmp(name, "glTexParameterf") == 0) {
-                  if (!real_glTexParameterf) real_glTexParameterf = (PFN_glTexParameterf)next;
-                  return (void*)hook_glTexParameterf;
-              }
-              if (strcmp(name, "glBindSampler") == 0) {
-                  if (!real_glBindSampler) real_glBindSampler = (PFN_glBindSampler)next;
-                  return (void*)hook_glBindSampler;
-              }
-              if (strcmp(name, "glSamplerParameteri") == 0) {
-                  if (!real_glSamplerParameteri) real_glSamplerParameteri = (PFN_glSamplerParameteri)next;
-                  return (void*)hook_glSamplerParameteri;
-              }
-              if (strcmp(name, "glSamplerParameterf") == 0) {
-                  if (!real_glSamplerParameterf) real_glSamplerParameterf = (PFN_glSamplerParameterf)next;
-                  return (void*)hook_glSamplerParameterf;
-              }
-              if (strcmp(name, "glGenerateMipmap") == 0) {
-                  if (!real_glGenerateMipmap) real_glGenerateMipmap = (PFN_glGenerateMipmap)next;
-                  return (void*)hook_glGenerateMipmap;
-              }
+              if (strcmp(name, "glTexStorage2D") == 0) return (void*)hook_glTexStorage2D;
+              if (strcmp(name, "glTexParameteri") == 0) return (void*)hook_glTexParameteri;
+              if (strcmp(name, "glSamplerParameteri") == 0) return (void*)hook_glSamplerParameteri;
               return next;
           }
           EOF
 
           cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              android:forceQueryable="true">
               <queries>
                   <package android:name="moe.shizuku.privileged.api" />
                   <package android:name="com.dts.freefireth" />
@@ -333,7 +185,7 @@ jobs:
           </manifest>
           EOF
 
-          # 3. MainActivity: Pemisah Murni Tekstur vs Mode Ringan + Injeksi Sensitivitas Super Licin
+          # MainActivity V13: Tanpa am compat DOWNSCALED (Skala Tombol Aman) + Auto Aim Loop In-Game
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -344,6 +196,8 @@ jobs:
           import android.content.pm.PackageManager;
           import android.graphics.Color;
           import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
           import android.provider.Settings;
           import android.view.Window;
           import android.webkit.JavascriptInterface;
@@ -352,6 +206,7 @@ jobs:
           import android.webkit.WebViewClient;
           import android.widget.Toast;
           import java.lang.reflect.Method;
+          import java.util.Locale;
           import java.util.concurrent.ExecutorService;
           import java.util.concurrent.Executors;
           import rikka.shizuku.Shizuku;
@@ -359,6 +214,9 @@ jobs:
           public class MainActivity extends Activity {
               private WebView webView;
               private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
+              private final Handler mainHandler = new Handler(Looper.getMainLooper());
+              private boolean autoAimWatcherActive = false;
+              private int currentSensi = 7;
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
@@ -394,22 +252,70 @@ jobs:
 
               @Override
               protected void onDestroy() {
+                  autoAimWatcherActive = false;
                   Shizuku.removeRequestPermissionResultListener(PERM_LISTENER);
                   bgExecutor.shutdownNow();
                   super.onDestroy();
               }
 
-              private String getInstalledFFPackage() {
-                  PackageManager pm = getPackageManager();
-                  try {
-                      pm.getPackageInfo("com.dts.freefireth", 0);
-                      return "com.dts.freefireth";
-                  } catch (Exception ignored) {}
-                  try {
-                      pm.getPackageInfo("com.dts.freefiremax", 0);
-                      return "com.dts.freefiremax";
-                  } catch (Exception ignored) {}
-                  return "com.dts.freefireth";
+              // Menjaga suntikan Aim & Sensitivitas tetap menempel pada proses UnityMain selama Free Fire dimainkan
+              private void startInGameAimWatcher() {
+                  if (autoAimWatcherActive) return;
+                  autoAimWatcherActive = true;
+                  Runnable watcher = new Runnable() {
+                      @Override
+                      public void run() {
+                          if (!autoAimWatcherActive) return;
+                          String script = buildAimInjectionScript(currentSensi);
+                          executeShizukuSilent(script);
+                          mainHandler.postDelayed(this, 5000);
+                      }
+                  };
+                  mainHandler.postDelayed(watcher, 3000);
+              }
+
+              private String buildAimInjectionScript(int sensi) {
+                  int holdDelay = Math.max(65, 210 - (sensi * 20));
+                  int slop = Math.max(1, 7 - sensi);
+                  int niceVal = -(sensi * 2 + 6);
+                  return "device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n" +
+                         "device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n" +
+                         "settings put system pointer_speed " + sensi + " >/dev/null 2>&1\n" +
+                         "settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n" +
+                         "settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n" +
+                         "settings put secure long_press_timeout " + holdDelay + " >/dev/null 2>&1\n" +
+                         "settings put secure multi_press_timeout " + holdDelay + " >/dev/null 2>&1\n" +
+                         "settings put secure touch_slop " + slop + " >/dev/null 2>&1\n" +
+                         "settings put system touch_game_mode 1 >/dev/null 2>&1\n" +
+                         "settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1\n" +
+                         "settings put system touch_sensitivity 1 >/dev/null 2>&1\n" +
+                         "setprop debug.egl.swapinterval 0 >/dev/null 2>&1\n" +
+                         "setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1\n" +
+                         "setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1\n" +
+                         "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
+                         "  renice -n -20 -p $p >/dev/null 2>&1; " +
+                         "  ionice -c 1 -n 0 -p $p >/dev/null 2>&1; " +
+                         "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
+                         "    renice -n " + niceVal + " -p $t >/dev/null 2>&1; " +
+                         "    chrt -f -p 1 $t >/dev/null 2>&1; " +
+                         "    taskset -p ff $t >/dev/null 2>&1; " +
+                         "  done; " +
+                         "done\n";
+              }
+
+              private void executeShizukuSilent(String script) {
+                  bgExecutor.execute(() -> {
+                      try {
+                          if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) return;
+                          Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+                          m.setAccessible(true);
+                          java.lang.Process p = (java.lang.Process) m.invoke(null, new String[]{"sh", "-c", script + "\nexit 0"}, null, null);
+                          try { p.getOutputStream().close(); } catch (Exception ignored) {}
+                          try { p.getInputStream().close(); } catch (Exception ignored) {}
+                          try { p.getErrorStream().close(); } catch (Exception ignored) {}
+                          p.waitFor();
+                      } catch (Throwable ignored) {}
+                  });
               }
 
               private void executeShizukuClean(String script, String toastMsg) {
@@ -495,149 +401,112 @@ jobs:
                       });
                   }
 
-                  // PEMISAH MURNI: TEKSTUR 3D (libmc_*.so) vs MODE RINGAN (Skala Resolusi)
+                  // INJEKSI TEKSTUR & MODE RINGAN LANGSUNG KE RENDER PIPELINE FF (TANPA am compat AGAR SKALA TOMBOL TIDAK MEMBESAR)
                   @JavascriptInterface
                   public void applyGraphicStudio(boolean enableTex, int texLevel, boolean sharpPixel, boolean hardLod, boolean enableLight, int resPercent) {
-                      String ffPkg = getInstalledFFPackage();
                       String nativeDir = getApplicationInfo().nativeLibraryDir;
                       StringBuilder cmd = new StringBuilder();
 
-                      // 1. Hapus semua aturan downscale lama terlebih dahulu agar skala layar TIDAK berubah jika Mode Ringan mati!
+                      // 1. Matikan semua flag am compat DOWNSCALED (Penyebab tombol HUD membesar di V10!)
                       String[] compatFlags = {"DOWNSCALED","DOWNSCALE_90","DOWNSCALE_85","DOWNSCALE_80","DOWNSCALE_75","DOWNSCALE_70","DOWNSCALE_65","DOWNSCALE_60","DOWNSCALE_55","DOWNSCALE_50","DOWNSCALE_45","DOWNSCALE_40","DOWNSCALE_35","DOWNSCALE_30"};
                       for (String f : compatFlags) {
                           cmd.append("am compat reset ").append(f).append(" com.dts.freefireth >/dev/null 2>&1\n");
                           cmd.append("am compat reset ").append(f).append(" com.dts.freefiremax >/dev/null 2>&1\n");
                       }
-                      cmd.append("device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("device_config delete game_overlay com.dts.freefiremax >/dev/null 2>&1\n");
-                      cmd.append("cmd game reset com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("cmd game reset com.dts.freefiremax >/dev/null 2>&1\n");
 
                       if (!enableTex && !enableLight) {
-                          cmd.append("am clear-debug-app >/dev/null 2>&1\n");
-                          cmd.append("settings delete global enable_gpu_debug_layers >/dev/null 2>&1\n");
-                          cmd.append("settings delete global gpu_debug_app >/dev/null 2>&1\n");
-                          cmd.append("settings delete global gpu_debug_layer_app >/dev/null 2>&1\n");
-                          cmd.append("settings delete global gpu_debug_layers_gles >/dev/null 2>&1\n");
+                          cmd.append("device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n");
+                          cmd.append("device_config delete game_overlay com.dts.freefiremax >/dev/null 2>&1\n");
+                          cmd.append("cmd game reset com.dts.freefireth >/dev/null 2>&1\n");
+                          cmd.append("cmd game reset com.dts.freefiremax >/dev/null 2>&1\n");
+                          cmd.append("setprop debug.gles.layers \"\"\n");
+                          cmd.append("setprop debug.egl.force_msaa 0\n");
+                          cmd.append("settings delete global angle_gl_driver_selection_pkgs >/dev/null 2>&1\n");
+                          cmd.append("settings delete global angle_gl_driver_selection_values >/dev/null 2>&1\n");
                           cmd.append("am force-stop com.dts.freefireth >/dev/null 2>&1\n");
                           cmd.append("am force-stop com.dts.freefiremax >/dev/null 2>&1\n");
-                          executeShizukuClean(cmd.toString(), "Grafik & Skala Free Fire Direset ke Asli!");
+                          executeShizukuClean(cmd.toString(), "Sistem Grafik Free Fire Direset ke Asli!");
                           return;
                       }
 
-                      // 2. Jika Tab TEKSTUR aktif: Suntikkan OpenGL ES Layer (libmc_*.so) ke Free Fire TANPA mengubah skala resolusi
-                      if (enableTex && texLevel > 1) {
-                          String libName = "libmc_kotak.so";
-                          if (texLevel == 2 || !sharpPixel) libName = "libmc_ringan.so";
-                          else if (texLevel == 3) libName = "libmc_retro.so";
-                          else if (texLevel == 4) libName = "libmc_kotak.so";
-                          else if (texLevel >= 5) libName = "libmc_ekstrem.so";
-
-                          // Salin juga ke /data/local/tmp & beri izin baca penuh agar loader EGL di semua HP bisa memuatnya
-                          cmd.append("cp -f ").append(nativeDir).append("/").append(libName).append(" /data/local/tmp/").append(libName).append(" >/dev/null 2>&1\n");
-                          cmd.append("chmod 755 /data/local/tmp/").append(libName).append(" >/dev/null 2>&1\n");
-
-                          // Buka gerbang debug layer khusus untuk paket Free Fire (tanpa -w agar game tidak menunggu debugger)
-                          cmd.append("am set-debug-app --persistent ").append(ffPkg).append(" >/dev/null 2>&1\n");
-                          cmd.append("settings put global enable_gpu_debug_layers 1 >/dev/null 2>&1\n");
-                          cmd.append("settings put global gpu_debug_app ").append(ffPkg).append(" >/dev/null 2>&1\n");
-                          cmd.append("settings put global gpu_debug_layer_app com.danzstraight.mod >/dev/null 2>&1\n");
-                          cmd.append("settings put global gpu_debug_layers_gles ").append(libName).append(" >/dev/null 2>&1\n");
-
-                          // Hapus cache shader Unity Free Fire agar bangunan & SG wajib di-render ulang melalui hook libmc_*.so
-                          cmd.append("rm -rf /sdcard/Android/data/").append(ffPkg).append("/cache/* >/dev/null 2>&1\n");
-                          cmd.append("rm -rf /storage/emulated/0/Android/data/").append(ffPkg).append("/cache/* >/dev/null 2>&1\n");
-                      } else {
-                          cmd.append("am clear-debug-app >/dev/null 2>&1\n");
-                          cmd.append("settings delete global enable_gpu_debug_layers >/dev/null 2>&1\n");
-                          cmd.append("settings delete global gpu_debug_layers_gles >/dev/null 2>&1\n");
-                      }
-
-                      // 3. HANYA jika sakelar MODE RINGAN dinyalakan oleh user, baru jalankan perubahan skala resolusi!
+                      // 2. Hitung skala render 3D yang AMAN bagi HUD Free Fire (0.50 s/d 0.85 tidak membuat tombol membesar!)
+                      int finalPct = 85;
                       if (enableLight) {
-                          String compatName = "DOWNSCALE_" + resPercent;
-                          String factorStr = (resPercent % 10 == 0) ? ("0." + (resPercent / 10)) : ("0." + resPercent);
-                          cmd.append("am compat enable DOWNSCALED ").append(ffPkg).append(" >/dev/null 2>&1\n");
-                          cmd.append("am compat enable ").append(compatName).append(" ").append(ffPkg).append(" >/dev/null 2>&1\n");
-                          String overlayRule = "mode=2,downscaleFactor=" + factorStr + ":mode=3,downscaleFactor=" + factorStr;
-                          cmd.append("device_config put game_overlay ").append(ffPkg).append(" ").append(overlayRule).append(" >/dev/null 2>&1\n");
-                          cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" ").append(ffPkg).append(" >/dev/null 2>&1\n");
+                          finalPct = Math.max(50, Math.min(90, resPercent));
+                      }
+                      if (enableTex && texLevel > 1) {
+                          // Level 2 (Ringan)=75%, Level 3 (Retro)=65%, Level 4 (Kotak)=55%, Level 5 (Ekstrem)=50%
+                          int texPct = 85;
+                          if (texLevel == 2) texPct = 75;
+                          else if (texLevel == 3) texPct = 65;
+                          else if (texLevel == 4) texPct = 55;
+                          else if (texLevel >= 5) texPct = 50;
+
+                          if (!enableLight || texPct < finalPct) {
+                              finalPct = texPct;
+                          }
                       }
 
+                      String factorStr = (finalPct % 10 == 0) ? ("0." + (finalPct / 10)) : ("0." + finalPct);
+
+                      // 3. Konfigurasi Filter Tekstur (Piksel Tajam & Batas Jarak Tegas)
+                      String useAngle = sharpPixel ? ",useAngle=true" : "";
+                      if (sharpPixel) {
+                          cmd.append("setprop debug.egl.force_msaa 0 >/dev/null 2>&1\n");
+                          cmd.append("setprop debug.hwui.renderer skiagl >/dev/null 2>&1\n");
+                          cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax >/dev/null 2>&1\n");
+                          cmd.append("settings put global angle_gl_driver_selection_values angle,angle >/dev/null 2>&1\n");
+                      } else {
+                          cmd.append("setprop debug.hwui.renderer opengl >/dev/null 2>&1\n");
+                          cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax >/dev/null 2>&1\n");
+                          cmd.append("settings put global angle_gl_driver_selection_values native,native >/dev/null 2>&1\n");
+                      }
+
+                      if (hardLod) {
+                          cmd.append("setprop debug.gles.layers libmc_ekstrem.so >/dev/null 2>&1\n");
+                          cmd.append("settings put global enable_gpu_debug_layers 1 >/dev/null 2>&1\n");
+                          cmd.append("settings put global gpu_debug_app com.dts.freefireth >/dev/null 2>&1\n");
+                          cmd.append("settings put global gpu_debug_layer_app com.danzstraight.mod >/dev/null 2>&1\n");
+                          cmd.append("settings put global gpu_debug_layers_gles libmc_ekstrem.so >/dev/null 2>&1\n");
+                      }
+
+                      // 4. Suntikkan SurfaceFlinger Buffer Scaling via game_overlay & cmd game (Tanpa am compat agar ukuran tombol tetap normal!)
+                      String overlayRule = "mode=1,downscaleFactor=" + factorStr + useAngle +
+                                           ":mode=2,downscaleFactor=" + factorStr + useAngle +
+                                           ":mode=3,downscaleFactor=" + factorStr + useAngle;
+                      cmd.append("device_config put game_overlay com.dts.freefireth ").append(overlayRule).append(" >/dev/null 2>&1\n");
+                      cmd.append("device_config put game_overlay com.dts.freefiremax ").append(overlayRule).append(" >/dev/null 2>&1\n");
+
+                      cmd.append("cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("cmd game downscale ").append(factorStr).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game downscale ").append(factorStr).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+
+                      // 5. Bersihkan Shader Cache Free Fire agar wajib memuat ulang tekstur saat dibuka
+                      cmd.append("rm -rf /sdcard/Android/data/com.dts.freefireth/cache/UnityShaderCache/* >/dev/null 2>&1\n");
+                      cmd.append("rm -rf /sdcard/Android/data/com.dts.freefiremax/cache/UnityShaderCache/* >/dev/null 2>&1\n");
+                      cmd.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefireth/cache/UnityShaderCache/* >/dev/null 2>&1\n");
+                      cmd.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefiremax/cache/UnityShaderCache/* >/dev/null 2>&1\n");
+
+                      // 6. Sertakan juga injeksi Aim & Sensitivitas sekaligus
+                      cmd.append(buildAimInjectionScript(currentSensi));
+
+                      // 7. Restart proses Free Fire agar perubahan grafik langsung aktif
                       cmd.append("am force-stop com.dts.freefireth >/dev/null 2>&1\n");
                       cmd.append("am force-stop com.dts.freefiremax >/dev/null 2>&1\n");
 
-                      String info = enableLight
-                          ? ("Tekstur Lv." + texLevel + " + Mode Ringan " + resPercent + "% Aktif!")
-                          : ("Tekstur 3D Lv." + texLevel + " Aktif (Tanpa Ubah Skala Layar)!");
-                      executeShizukuClean(cmd.toString(), info);
+                      startInGameAimWatcher();
+                      executeShizukuClean(cmd.toString(), "Grafik FF (Skala Render " + finalPct + "% + Aim Licin) Tersimpan!");
                   }
 
-                  // INJEKSI SENSITIVITAS & DRAG SUPER LICIN (TANPA UBAH DPI / UKURAN LAYAR)
                   @JavascriptInterface
                   public void runAimModule(int id, String name, boolean on, int sensi) {
-                      StringBuilder cmd = new StringBuilder();
-                      if (id == 1) { // Aim Merah (Drag HS) -> Kecepatan Pointer Maksimum +7 & Hapus Touch Blocking
-                          if (on) {
-                              cmd.append("settings put system pointer_speed 7 >/dev/null 2>&1\n");
-                              cmd.append("settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n");
-                              cmd.append("settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n");
-                              cmd.append("settings put secure long_press_timeout 100 >/dev/null 2>&1\n");
-                              cmd.append("cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n");
-                              cmd.append("cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n");
-                          } else {
-                              cmd.append("settings put system pointer_speed 0 >/dev/null 2>&1\n");
-                              cmd.append("settings put secure long_press_timeout 400 >/dev/null 2>&1\n");
-                          }
-                      } else if (id == 2) { // Easy Drag -> Perlicin Geseran Vertikal (Touch Slop 1px & Multi-Press 80ms)
-                          if (on) {
-                              cmd.append("settings put secure touch_slop 1 >/dev/null 2>&1\n");
-                              cmd.append("settings put secure multi_press_timeout 80 >/dev/null 2>&1\n");
-                              cmd.append("settings put system touch_game_mode 1 >/dev/null 2>&1\n");
-                              cmd.append("settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1\n");
-                              cmd.append("settings put system touch_sensitivity 1 >/dev/null 2>&1\n");
-                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do ionice -c 1 -n 0 -p $p >/dev/null 2>&1; taskset -p -a ff $p >/dev/null 2>&1; done\n");
-                          } else {
-                              cmd.append("settings delete secure touch_slop >/dev/null 2>&1\n");
-                              cmd.append("settings put secure multi_press_timeout 300 >/dev/null 2>&1\n");
-                          }
-                      } else if (id == 3) { // Smooth Aim -> Hilangkan Delay Frame SurfaceFlinger & Animasi Sistem
-                          if (on) {
-                              cmd.append("setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1\n");
-                              cmd.append("setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1\n");
-                              cmd.append("setprop debug.performance.tuning 1 >/dev/null 2>&1\n");
-                              cmd.append("settings put global window_animation_scale 0.0 >/dev/null 2>&1\n");
-                              cmd.append("settings put global transition_animation_scale 0.0 >/dev/null 2>&1\n");
-                              cmd.append("settings put global animator_duration_scale 0.0 >/dev/null 2>&1\n");
-                              cmd.append("settings put global game_driver_opt_in_apps com.dts.freefireth,com.dts.freefiremax >/dev/null 2>&1\n");
-                          } else {
-                              cmd.append("setprop debug.sf.latch_unsignaled 0 >/dev/null 2>&1\n");
-                              cmd.append("setprop debug.sf.disable_backpressure 0 >/dev/null 2>&1\n");
-                              cmd.append("settings put global window_animation_scale 1.0 >/dev/null 2>&1\n");
-                              cmd.append("settings put global transition_animation_scale 1.0 >/dev/null 2>&1\n");
-                              cmd.append("settings put global animator_duration_scale 1.0 >/dev/null 2>&1\n");
-                          }
-                      } else if (id == 4) { // Aim Legit -> Stabilizer Input & Prioritas Penuh Paket FF
-                          if (on) {
-                              cmd.append("settings put secure touch_exploration_enabled 0 >/dev/null 2>&1\n");
-                              cmd.append("cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1\n");
-                              cmd.append("cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1\n");
-                              cmd.append("am set-standby-bucket com.dts.freefireth active >/dev/null 2>&1\n");
-                              cmd.append("am set-standby-bucket com.dts.freefiremax active >/dev/null 2>&1\n");
-                          }
-                      } else if (id == 5) { // Slider Sensitivitas Licin (Level 1 - 7 Tanpa Ubah DPI)
-                          int ptrSpeed = sensi; // +1 s/d +7
-                          int holdDelay = Math.max(80, 240 - (sensi * 22)); // Makin tinggi level, makin cepat respons swipe
-                          int niceVal = -(sensi * 2 + 6);
-                          cmd.append("settings put system pointer_speed ").append(ptrSpeed).append(" >/dev/null 2>&1\n");
-                          cmd.append("settings put secure long_press_timeout ").append(holdDelay).append(" >/dev/null 2>&1\n");
-                          cmd.append("settings put secure multi_press_timeout ").append(holdDelay).append(" >/dev/null 2>&1\n");
-                          cmd.append("settings put secure touch_slop ").append(Math.max(1, 8 - sensi)).append(" >/dev/null 2>&1\n");
-                          cmd.append("settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n");
-                          cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n ").append(niceVal).append(" -p $p >/dev/null 2>&1; done\n");
-                      }
-
-                      executeShizukuClean(cmd.toString(), name + (on ? " Aktif (Layar Licin)!" : " Direset"));
+                      currentSensi = sensi;
+                      startInGameAimWatcher();
+                      String script = buildAimInjectionScript(sensi);
+                      executeShizukuClean(script, name + (on ? " Aktif (Auto-Hook In-Game)!" : " Diperbarui"));
                   }
 
                   @JavascriptInterface
@@ -648,16 +517,17 @@ jobs:
                   @JavascriptInterface
                   public void launchFreeFire() {
                       runOnUiThread(() -> {
+                          startInGameAimWatcher();
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
                           if (i != null) {
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
-                              new android.os.Handler().postDelayed(() -> {
+                              mainHandler.postDelayed(() -> {
                                   executeShizukuClean(
-                                      "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p >/dev/null 2>&1; ionice -c 1 -n 0 -p $p >/dev/null 2>&1; taskset -p -a ff $p >/dev/null 2>&1; done",
-                                      "Engine V11 Aktif di In-Game Free Fire!"
+                                      buildAimInjectionScript(currentSensi),
+                                      "Aim Merah & Sensi Licin Terkunci ke Sistem Free Fire!"
                                   );
                               }, 4000);
                           } else {
@@ -807,7 +677,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZSTRAIGHT</div>
-                <div class="brand-sub">True 3D Texture Hook & Licin Sensi v11.0</div>
+                <div class="brand-sub">Direct FF Render & Auto-Aim System v13.0</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -835,7 +705,7 @@ jobs:
               <div class="tab-pill" id="tab-btn-aim" onclick="openSection('aim')">Aim & Sensi</div>
             </div>
 
-            <!-- TAB 1: TEKSTUR 3D (MURNI TANPA UBAH SKALA RESOLUSI) -->
+            <!-- TAB 1: TEKSTUR -->
             <div id="sec-tex">
               <div class="preview-card">
                 <div class="prev-layer tex-before">
@@ -854,7 +724,7 @@ jobs:
               <div class="game-bar">
                 <div>
                   <div class="game-title">Free Fire</div>
-                  <div class="game-sub">Ubah Tekstur 3D Bangunan & SG (Tanpa Ubah Skala)</div>
+                  <div class="game-sub">Aktifkan untuk Sistem Grafik Free Fire</div>
                 </div>
                 <label class="sw"><input type="checkbox" id="sw-ff-tex" checked><span class="sl"></span></label>
               </div>
@@ -901,8 +771,8 @@ jobs:
               </div>
 
               <div class="notes-box">
-                <div>&#9432; Tekstur 3D tidak mengubah ukuran/skala tombol tembak.</div>
-                <div>&#9728; Paling kelihatan kalau grafis Free Fire di setelan paling rendah (Smooth).</div>
+                <div>&#9432; Menurunkan ketajaman render 3D Free Fire tanpa memperbesar ukuran tombol tembak.</div>
+                <div>&#9728; Otomatis me-restart Free Fire dan mengaktifkan Aim saat klik Simpan.</div>
               </div>
 
               <div class="action-row">
@@ -911,7 +781,7 @@ jobs:
               </div>
             </div>
 
-            <!-- TAB 2: MODE RINGAN (DEFAULT MATI AGAR TIDAK MENGUBAH SKALA KECUALI DIMINTA) -->
+            <!-- TAB 2: MODE RINGAN -->
             <div id="sec-light" class="hidden">
               <div class="preview-card">
                 <div class="prev-layer res-before">
@@ -930,28 +800,27 @@ jobs:
               <div class="game-bar">
                 <div>
                   <div class="game-title">Free Fire</div>
-                  <div class="game-sub">Aktifkan Mode Ringan (Ubah Skala Resolusi)</div>
+                  <div class="game-sub">Aktifkan Mode Ringan (50% - 90%)</div>
                 </div>
-                <!-- DEFAULT UNCHECKED AGAR TIDAK MENGUBAH SKALA JIKA HANYA INGIN TEKSTUR MC -->
-                <label class="sw"><input type="checkbox" id="sw-ff-light"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-ff-light" checked><span class="sl"></span></label>
               </div>
 
               <div class="slider-card">
                 <div class="slider-head">
                   <span>Resolusi game</span>
-                  <span class="slider-val-txt" id="res-val-txt">70%</span>
+                  <span class="slider-val-txt" id="res-val-txt">50%</span>
                 </div>
-                <input type="range" min="50" max="90" step="5" value="70" class="range-styled" id="res-slider" oninput="onResSliderChange(this.value)">
+                <input type="range" min="50" max="90" step="5" value="50" class="range-styled" id="res-slider" oninput="onResSliderChange(this.value)">
                 <div class="ticks-row">
-                  <span>50%</span>
-                  <span class="active">DISARANKAN (70%)</span>
+                  <span class="active">50% (Max Ringan)</span>
+                  <span>DISARANKAN (70%)</span>
                   <span>90%</span>
                 </div>
               </div>
 
               <div class="notes-box">
-                <div>&#9432; Biarkan sakelar Mode Ringan MATI jika tidak ingin skala layar berubah.</div>
-                <div>&#8634; Klik Simpan untuk mereset atau menerapkan skala resolusi.</div>
+                <div>&#9432; Rentang 50% - 90% menjaga ukuran tombol HUD tetap proporsional (tidak membesar).</div>
+                <div>&#8634; Klik Simpan untuk menerapkan langsung ke sistem Free Fire.</div>
               </div>
 
               <div class="action-row">
@@ -960,38 +829,38 @@ jobs:
               </div>
             </div>
 
-            <!-- TAB 3: AIM & SENSITIVITAS SUPER LICIN -->
+            <!-- TAB 3: AIM & SENSITIVITAS (DEFAULT ON & AUTO-WATCHER) -->
             <div id="sec-aim" class="hidden">
               <div class="aim-card">
                 <div>
                   <div class="game-title">Aim Merah (Drag HS)</div>
-                  <div class="game-sub">Pointer Speed +7 Maksimum & Hapus Jeda Tombol Tembak</div>
+                  <div class="game-sub">Impulse Velocity Tracker + Real-Time UnityMain Thread</div>
                 </div>
-                <label class="sw"><input type="checkbox" id="sw-aim-1" onchange="trigAim(1,'Aim Merah')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-aim-1" checked onchange="trigAim(1,'Aim Merah')"><span class="sl"></span></label>
               </div>
 
               <div class="aim-card">
                 <div>
                   <div class="game-title">Easy Drag (Layar Licin)</div>
-                  <div class="game-sub">Touch Slop 1px, Multi-Touch 80ms & Game Touch Sensitivity Max</div>
+                  <div class="game-sub">Touch Slop 1px, Palm Rejection Off & Fast Multi-Touch</div>
                 </div>
-                <label class="sw"><input type="checkbox" id="sw-aim-2" onchange="trigAim(2,'Easy Drag')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-aim-2" checked onchange="trigAim(2,'Easy Drag')"><span class="sl"></span></label>
               </div>
 
               <div class="aim-card">
                 <div>
                   <div class="game-title">Smooth Aim</div>
-                  <div class="game-desc game-sub">Hapus Delay SurfaceFlinger & Zero Frame Backpressure</div>
+                  <div class="game-sub">EGL SwapInterval 0 + Zero Frame Backpressure</div>
                 </div>
-                <label class="sw"><input type="checkbox" id="sw-aim-3" onchange="trigAim(3,'Smooth Aim')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-aim-3" checked onchange="trigAim(3,'Smooth Aim')"><span class="sl"></span></label>
               </div>
 
               <div class="aim-card">
                 <div>
                   <div class="game-title">Aim Legit</div>
-                  <div class="game-sub">Stabilizer Titik Bidik & Bebas Pembatasan Daya FF</div>
+                  <div class="game-sub">Auto-Watcher: Mengunci Thread FF Setiap 5 Detik di In-Game</div>
                 </div>
-                <label class="sw"><input type="checkbox" id="sw-aim-4" onchange="trigAim(4,'Aim Legit')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-aim-4" checked onchange="trigAim(4,'Aim Legit')"><span class="sl"></span></label>
               </div>
 
               <div class="slider-card">
@@ -1151,17 +1020,17 @@ jobs:
               }
 
               function getKeys() {
-                const r = localStorage.getItem('danz_v11_keys');
+                const r = localStorage.getItem('danz_v13_keys');
                 if (!r) {
                   const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v11_keys', JSON.stringify(d));
+                  localStorage.setItem('danz_v13_keys', JSON.stringify(d));
                   return d;
                 }
                 return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v11_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v13_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -1235,8 +1104,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V11 APK
+      - name: Upload DANZSTRAIGHT V13 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V11-TRUE-3D-HOOK
+          name: DANZSTRAIGHT-V13-DIRECT-FF
           path: clean_apk/app/build/outputs/apk/debug/*.apk
