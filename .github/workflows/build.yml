@@ -14,8 +14,23 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Download & Setup Android SDK Manually
+      - name: Download and Setup Gradle
         run: |
-          mkdir -p $HOME/android-sdk/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdtools.zip
-          unzip -q cmdtools.zip -d $HOME/android
+          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip -q gradle-8.7-bin.zip
+          sudo mv gradle-8.7 /opt/gradle
+          sudo ln -s /opt/gradle/bin/gradle /usr/bin/gradle
+
+      - name: Build APK Clean
+        run: |
+          gradle assembleDebug --stacktrace --no-daemon
+
+      - name: Upload Compiled APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DANZSTRAIGHT-APK
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/**/*.apk
+            build/outputs/apk/**/*.apk
+            *.apk
