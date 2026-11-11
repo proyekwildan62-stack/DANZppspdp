@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V13 Direct FF Graphics & Auto-Aim
+name: Build DANZSTRAIGHT V14 XArena Bypass & Licin Sensi
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V13 APK
+      - name: Build DANZSTRAIGHT V14 APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -48,8 +48,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 130
-              versionName "13.0"
+              versionCode 140
+              versionName "14.0"
               ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
             }
             packagingOptions {
@@ -185,7 +185,7 @@ jobs:
           </manifest>
           EOF
 
-          # MainActivity V13: Tanpa am compat DOWNSCALED (Skala Tombol Aman) + Auto Aim Loop In-Game
+          # MainActivity V14: XArena Override + am compat DOWNSCALED + Super Licin Touch Scaling
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -206,7 +206,6 @@ jobs:
           import android.webkit.WebViewClient;
           import android.widget.Toast;
           import java.lang.reflect.Method;
-          import java.util.Locale;
           import java.util.concurrent.ExecutorService;
           import java.util.concurrent.Executors;
           import rikka.shizuku.Shizuku;
@@ -215,8 +214,10 @@ jobs:
               private WebView webView;
               private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
               private final Handler mainHandler = new Handler(Looper.getMainLooper());
-              private boolean autoAimWatcherActive = false;
+              private boolean autoWatcherRunning = false;
               private int currentSensi = 7;
+              private int activeScalePct = 50;
+              private boolean graphicHookEnabled = true;
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
@@ -252,46 +253,77 @@ jobs:
 
               @Override
               protected void onDestroy() {
-                  autoAimWatcherActive = false;
+                  autoWatcherRunning = false;
                   Shizuku.removeRequestPermissionResultListener(PERM_LISTENER);
                   bgExecutor.shutdownNow();
                   super.onDestroy();
               }
 
-              // Menjaga suntikan Aim & Sensitivitas tetap menempel pada proses UnityMain selama Free Fire dimainkan
-              private void startInGameAimWatcher() {
-                  if (autoAimWatcherActive) return;
-                  autoAimWatcherActive = true;
+              // Watcher Otomatis: Menjaga Skala Grafik & Sensitivitas Licin agar TIDAK di-reset oleh XArena saat Free Fire berjalan
+              private void startInGameWatcher() {
+                  if (autoWatcherRunning) return;
+                  autoWatcherRunning = true;
                   Runnable watcher = new Runnable() {
                       @Override
                       public void run() {
-                          if (!autoAimWatcherActive) return;
-                          String script = buildAimInjectionScript(currentSensi);
-                          executeShizukuSilent(script);
-                          mainHandler.postDelayed(this, 5000);
+                          if (!autoWatcherRunning) return;
+                          StringBuilder sb = new StringBuilder();
+                          sb.append(buildSlipperyAimScript(currentSensi));
+                          if (graphicHookEnabled && activeScalePct < 100) {
+                              String compatName = "DOWNSCALE_" + activeScalePct;
+                              String factorStr = (activeScalePct % 10 == 0) ? ("0." + (activeScalePct / 10)) : ("0." + activeScalePct);
+                              sb.append("am compat enable DOWNSCALED com.dts.freefireth >/dev/null 2>&1\n");
+                              sb.append("am compat enable DOWNSCALED com.dts.freefiremax >/dev/null 2>&1\n");
+                              sb.append("am compat enable ").append(compatName).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                              sb.append("am compat enable ").append(compatName).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+                              sb.append("cmd game downscale ").append(factorStr).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                              sb.append("cmd game downscale ").append(factorStr).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+                          }
+                          executeShizukuSilent(sb.toString());
+                          mainHandler.postDelayed(this, 4000);
                       }
                   };
-                  mainHandler.postDelayed(watcher, 3000);
+                  mainHandler.postDelayed(watcher, 2500);
               }
 
-              private String buildAimInjectionScript(int sensi) {
-                  int holdDelay = Math.max(65, 210 - (sensi * 20));
-                  int slop = Math.max(1, 7 - sensi);
-                  int niceVal = -(sensi * 2 + 6);
+              // Script Sensitivitas Super Licin + Bypass Limit 60 FPS XArena (Infinix/Transsion)
+              private String buildSlipperyAimScript(int sensi) {
+                  int holdDelay = Math.max(55, 195 - (sensi * 20)); // Level 7 = 55ms (Super Responsif)
+                  int niceVal = -(sensi * 2 + 6); // Level 7 = -20 (Prioritas Tertinggi)
+
                   return "device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n" +
+                         "device_config put input_native_boot resample_touch 1 >/dev/null 2>&1\n" +
+                         "device_config put input_native_boot deep_press_enabled 0 >/dev/null 2>&1\n" +
                          "device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n" +
-                         "settings put system pointer_speed " + sensi + " >/dev/null 2>&1\n" +
+                         "device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n" +
+                         // Pengaturan Kecepatan Geser & Touch Slop 0px (Geser sedikit langsung bereaksi)
+                         "settings put system pointer_speed 7 >/dev/null 2>&1\n" +
+                         "settings put secure touch_slop 0 >/dev/null 2>&1\n" +
+                         "settings put system touch_slop 0 >/dev/null 2>&1\n" +
                          "settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n" +
                          "settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n" +
                          "settings put secure long_press_timeout " + holdDelay + " >/dev/null 2>&1\n" +
                          "settings put secure multi_press_timeout " + holdDelay + " >/dev/null 2>&1\n" +
-                         "settings put secure touch_slop " + slop + " >/dev/null 2>&1\n" +
+                         // Override Khusus XArena (Infinix/Tecno/Itel) & Game Touch Sensitivity
                          "settings put system touch_game_mode 1 >/dev/null 2>&1\n" +
                          "settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1\n" +
                          "settings put system touch_sensitivity 1 >/dev/null 2>&1\n" +
+                         "settings put global game_space_touch_sensitivity 100 >/dev/null 2>&1\n" +
+                         "settings put global game_space_swipe_sensitivity 100 >/dev/null 2>&1\n" +
+                         "settings put system transsion_game_mode 1 >/dev/null 2>&1\n" +
+                         // Buka Kunci Refresh Rate 90Hz/120Hz (Agar tidak tertahan di 58 FPS oleh XArena)
+                         "settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n" +
+                         "settings put system min_refresh_rate 120.0 >/dev/null 2>&1\n" +
+                         "settings put secure user_refresh_rate 120 >/dev/null 2>&1\n" +
+                         "settings put global tran_refresh_rate_mode 120 >/dev/null 2>&1\n" +
+                         // Properti Akselerasi Fling & Input Event Rate
+                         "setprop windowsmgr.max_events_per_sec 300 >/dev/null 2>&1\n" +
+                         "setprop view.scroll_friction 0.001 >/dev/null 2>&1\n" +
+                         "setprop view.minimum_fling_velocity 1 >/dev/null 2>&1\n" +
                          "setprop debug.egl.swapinterval 0 >/dev/null 2>&1\n" +
                          "setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1\n" +
                          "setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1\n" +
+                         // Kunci Seluruh Sub-Thread UnityMain & Input Free Fire ke Real-Time Priority
                          "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
                          "  renice -n -20 -p $p >/dev/null 2>&1; " +
                          "  ionice -c 1 -n 0 -p $p >/dev/null 2>&1; " +
@@ -401,13 +433,12 @@ jobs:
                       });
                   }
 
-                  // INJEKSI TEKSTUR & MODE RINGAN LANGSUNG KE RENDER PIPELINE FF (TANPA am compat AGAR SKALA TOMBOL TIDAK MEMBESAR)
+                  // INJEKSI GRAFIK + KOORDINAT LAYAR LICIN KHUSUS FREE FIRE (am compat DOWNSCALED + game_overlay)
                   @JavascriptInterface
                   public void applyGraphicStudio(boolean enableTex, int texLevel, boolean sharpPixel, boolean hardLod, boolean enableLight, int resPercent) {
-                      String nativeDir = getApplicationInfo().nativeLibraryDir;
                       StringBuilder cmd = new StringBuilder();
 
-                      // 1. Matikan semua flag am compat DOWNSCALED (Penyebab tombol HUD membesar di V10!)
+                      // 1. Bersihkan flag lama terlebih dahulu
                       String[] compatFlags = {"DOWNSCALED","DOWNSCALE_90","DOWNSCALE_85","DOWNSCALE_80","DOWNSCALE_75","DOWNSCALE_70","DOWNSCALE_65","DOWNSCALE_60","DOWNSCALE_55","DOWNSCALE_50","DOWNSCALE_45","DOWNSCALE_40","DOWNSCALE_35","DOWNSCALE_30"};
                       for (String f : compatFlags) {
                           cmd.append("am compat reset ").append(f).append(" com.dts.freefireth >/dev/null 2>&1\n");
@@ -415,12 +446,12 @@ jobs:
                       }
 
                       if (!enableTex && !enableLight) {
+                          graphicHookEnabled = false;
+                          activeScalePct = 100;
                           cmd.append("device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n");
                           cmd.append("device_config delete game_overlay com.dts.freefiremax >/dev/null 2>&1\n");
                           cmd.append("cmd game reset com.dts.freefireth >/dev/null 2>&1\n");
                           cmd.append("cmd game reset com.dts.freefiremax >/dev/null 2>&1\n");
-                          cmd.append("setprop debug.gles.layers \"\"\n");
-                          cmd.append("setprop debug.egl.force_msaa 0\n");
                           cmd.append("settings delete global angle_gl_driver_selection_pkgs >/dev/null 2>&1\n");
                           cmd.append("settings delete global angle_gl_driver_selection_values >/dev/null 2>&1\n");
                           cmd.append("am force-stop com.dts.freefireth >/dev/null 2>&1\n");
@@ -429,28 +460,34 @@ jobs:
                           return;
                       }
 
-                      // 2. Hitung skala render 3D yang AMAN bagi HUD Free Fire (0.50 s/d 0.85 tidak membuat tombol membesar!)
-                      int finalPct = 85;
-                      if (enableLight) {
-                          finalPct = Math.max(50, Math.min(90, resPercent));
-                      }
+                      graphicHookEnabled = true;
+
+                      // 2. Hitung skala kelipatan 5% resmi AOSP (Membuat grafik burik/kotak & mempercepat rasio geser kamera FF!)
+                      // Level 2 (Ringan)=75%, Level 3 (Retro)=65%, Level 4 (Kotak)=55%, Level 5 (Ekstrem)=45%
+                      int targetPct = enableLight ? resPercent : 85;
                       if (enableTex && texLevel > 1) {
-                          // Level 2 (Ringan)=75%, Level 3 (Retro)=65%, Level 4 (Kotak)=55%, Level 5 (Ekstrem)=50%
                           int texPct = 85;
                           if (texLevel == 2) texPct = 75;
                           else if (texLevel == 3) texPct = 65;
                           else if (texLevel == 4) texPct = 55;
-                          else if (texLevel >= 5) texPct = 50;
-
-                          if (!enableLight || texPct < finalPct) {
-                              finalPct = texPct;
+                          else if (texLevel >= 5) texPct = 45;
+                          if (!enableLight || texPct < targetPct) {
+                              targetPct = texPct;
                           }
                       }
+                      activeScalePct = targetPct;
 
-                      String factorStr = (finalPct % 10 == 0) ? ("0." + (finalPct / 10)) : ("0." + finalPct);
-
-                      // 3. Konfigurasi Filter Tekstur (Piksel Tajam & Batas Jarak Tegas)
+                      String compatName = "DOWNSCALE_" + targetPct;
+                      String factorStr = (targetPct % 10 == 0) ? ("0." + (targetPct / 10)) : ("0." + targetPct);
                       String useAngle = sharpPixel ? ",useAngle=true" : "";
+
+                      // 3. Aktifkan am compat DOWNSCALED (Jalur yang 100% menembus XArena Infinix!)
+                      cmd.append("am compat enable DOWNSCALED com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("am compat enable DOWNSCALED com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("am compat enable ").append(compatName).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("am compat enable ").append(compatName).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+
+                      // 4. Aktifkan Driver & Filter Tekstur
                       if (sharpPixel) {
                           cmd.append("setprop debug.egl.force_msaa 0 >/dev/null 2>&1\n");
                           cmd.append("setprop debug.hwui.renderer skiagl >/dev/null 2>&1\n");
@@ -470,13 +507,12 @@ jobs:
                           cmd.append("settings put global gpu_debug_layers_gles libmc_ekstrem.so >/dev/null 2>&1\n");
                       }
 
-                      // 4. Suntikkan SurfaceFlinger Buffer Scaling via game_overlay & cmd game (Tanpa am compat agar ukuran tombol tetap normal!)
+                      // 5. Suntikkan ke game_overlay & cmd game
                       String overlayRule = "mode=1,downscaleFactor=" + factorStr + useAngle +
                                            ":mode=2,downscaleFactor=" + factorStr + useAngle +
                                            ":mode=3,downscaleFactor=" + factorStr + useAngle;
                       cmd.append("device_config put game_overlay com.dts.freefireth ").append(overlayRule).append(" >/dev/null 2>&1\n");
                       cmd.append("device_config put game_overlay com.dts.freefiremax ").append(overlayRule).append(" >/dev/null 2>&1\n");
-
                       cmd.append("cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n");
                       cmd.append("cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n");
                       cmd.append("cmd game downscale ").append(factorStr).append(" com.dts.freefireth >/dev/null 2>&1\n");
@@ -484,29 +520,39 @@ jobs:
                       cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" com.dts.freefireth >/dev/null 2>&1\n");
                       cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" com.dts.freefiremax >/dev/null 2>&1\n");
 
-                      // 5. Bersihkan Shader Cache Free Fire agar wajib memuat ulang tekstur saat dibuka
+                      // 6. Hapus Shader Cache & Sertakan Injeksi Sensitivitas Super Licin
                       cmd.append("rm -rf /sdcard/Android/data/com.dts.freefireth/cache/UnityShaderCache/* >/dev/null 2>&1\n");
                       cmd.append("rm -rf /sdcard/Android/data/com.dts.freefiremax/cache/UnityShaderCache/* >/dev/null 2>&1\n");
-                      cmd.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefireth/cache/UnityShaderCache/* >/dev/null 2>&1\n");
-                      cmd.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefiremax/cache/UnityShaderCache/* >/dev/null 2>&1\n");
+                      cmd.append(buildSlipperyAimScript(currentSensi));
 
-                      // 6. Sertakan juga injeksi Aim & Sensitivitas sekaligus
-                      cmd.append(buildAimInjectionScript(currentSensi));
-
-                      // 7. Restart proses Free Fire agar perubahan grafik langsung aktif
+                      // 7. Hentikan proses Free Fire agar saat dibuka langsung memuat grafik & rasio sentuh baru
                       cmd.append("am force-stop com.dts.freefireth >/dev/null 2>&1\n");
                       cmd.append("am force-stop com.dts.freefiremax >/dev/null 2>&1\n");
 
-                      startInGameAimWatcher();
-                      executeShizukuClean(cmd.toString(), "Grafik FF (Skala Render " + finalPct + "% + Aim Licin) Tersimpan!");
+                      startInGameWatcher();
+                      executeShizukuClean(cmd.toString(), "Grafik FF (" + targetPct + "%) & Sensi Super Licin Tersimpan!");
                   }
 
+                  // FITUR AIM & SENSITIVITAS SUPER LICIN (MENGUBAH RASIO KOORDINAT SENTUH DI DALAM FREE FIRE)
                   @JavascriptInterface
                   public void runAimModule(int id, String name, boolean on, int sensi) {
                       currentSensi = sensi;
-                      startInGameAimWatcher();
-                      String script = buildAimInjectionScript(sensi);
-                      executeShizukuClean(script, name + (on ? " Aktif (Auto-Hook In-Game)!" : " Diperbarui"));
+                      startInGameWatcher();
+                      StringBuilder sb = new StringBuilder();
+                      sb.append(buildSlipperyAimScript(sensi));
+
+                      // Jika Sensitivitas di-set ke Level 5-7, aktifkan juga Coordinate Multiplier pada paket FF agar geser sedikit langsung licin!
+                      if (id == 5 && on && sensi >= 5) {
+                          int coordScale = (sensi == 7) ? 55 : (sensi == 6 ? 65 : 75);
+                          activeScalePct = Math.min(activeScalePct, coordScale);
+                          String compatName = "DOWNSCALE_" + activeScalePct;
+                          sb.append("am compat enable DOWNSCALED com.dts.freefireth >/dev/null 2>&1\n");
+                          sb.append("am compat enable DOWNSCALED com.dts.freefiremax >/dev/null 2>&1\n");
+                          sb.append("am compat enable ").append(compatName).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                          sb.append("am compat enable ").append(compatName).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+                      }
+
+                      executeShizukuClean(sb.toString(), name + (on ? " Aktif (Geser Sedikit Langsung Licin)!" : " Diperbarui"));
                   }
 
                   @JavascriptInterface
@@ -517,7 +563,7 @@ jobs:
                   @JavascriptInterface
                   public void launchFreeFire() {
                       runOnUiThread(() -> {
-                          startInGameAimWatcher();
+                          startInGameWatcher();
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
@@ -526,8 +572,8 @@ jobs:
                               startActivity(i);
                               mainHandler.postDelayed(() -> {
                                   executeShizukuClean(
-                                      buildAimInjectionScript(currentSensi),
-                                      "Aim Merah & Sensi Licin Terkunci ke Sistem Free Fire!"
+                                      buildSlipperyAimScript(currentSensi),
+                                      "XArena Bypass + Aim & Sensi Licin Aktif di In-Game!"
                                   );
                               }, 4000);
                           } else {
@@ -677,7 +723,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZSTRAIGHT</div>
-                <div class="brand-sub">Direct FF Render & Auto-Aim System v13.0</div>
+                <div class="brand-sub">XArena Bypass & Super Licin Engine v14.0</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -724,7 +770,7 @@ jobs:
               <div class="game-bar">
                 <div>
                   <div class="game-title">Free Fire</div>
-                  <div class="game-sub">Aktifkan untuk Sistem Grafik Free Fire</div>
+                  <div class="game-sub">Aktifkan Sistem Grafik & Bypass XArena</div>
                 </div>
                 <label class="sw"><input type="checkbox" id="sw-ff-tex" checked><span class="sl"></span></label>
               </div>
@@ -771,8 +817,8 @@ jobs:
               </div>
 
               <div class="notes-box">
-                <div>&#9432; Menurunkan ketajaman render 3D Free Fire tanpa memperbesar ukuran tombol tembak.</div>
-                <div>&#9728; Otomatis me-restart Free Fire dan mengaktifkan Aim saat klik Simpan.</div>
+                <div>&#9432; Menggunakan <b>am compat DOWNSCALED</b> yang menembus proteksi XArena Infinix.</div>
+                <div>&#9728; Sekaligus membuat geseran layar Free Fire 2x lebih licin saat klik Simpan.</div>
               </div>
 
               <div class="action-row">
@@ -808,19 +854,19 @@ jobs:
               <div class="slider-card">
                 <div class="slider-head">
                   <span>Resolusi game</span>
-                  <span class="slider-val-txt" id="res-val-txt">50%</span>
+                  <span class="slider-val-txt" id="res-val-txt">55%</span>
                 </div>
-                <input type="range" min="50" max="90" step="5" value="50" class="range-styled" id="res-slider" oninput="onResSliderChange(this.value)">
+                <input type="range" min="45" max="90" step="5" value="55" class="range-styled" id="res-slider" oninput="onResSliderChange(this.value)">
                 <div class="ticks-row">
-                  <span class="active">50% (Max Ringan)</span>
-                  <span>DISARANKAN (70%)</span>
+                  <span>45% (Ekstrem)</span>
+                  <span class="active">55% (Pas & Licin)</span>
                   <span>90%</span>
                 </div>
               </div>
 
               <div class="notes-box">
-                <div>&#9432; Rentang 50% - 90% menjaga ukuran tombol HUD tetap proporsional (tidak membesar).</div>
-                <div>&#8634; Klik Simpan untuk menerapkan langsung ke sistem Free Fire.</div>
+                <div>&#9432; Semakin rendah persentase (45% - 55%), grafik makin burik/ringan dan geseran layar makin licin.</div>
+                <div>&#8634; Klik Simpan untuk menerapkan langsung ke Free Fire.</div>
               </div>
 
               <div class="action-row">
@@ -829,28 +875,28 @@ jobs:
               </div>
             </div>
 
-            <!-- TAB 3: AIM & SENSITIVITAS (DEFAULT ON & AUTO-WATCHER) -->
+            <!-- TAB 3: AIM & SENSITIVITAS SUPER LICIN -->
             <div id="sec-aim" class="hidden">
               <div class="aim-card">
                 <div>
                   <div class="game-title">Aim Merah (Drag HS)</div>
-                  <div class="game-sub">Impulse Velocity Tracker + Real-Time UnityMain Thread</div>
+                  <div class="game-sub">Impulse Velocity + Real-Time UnityMain Priority (-20)</div>
                 </div>
                 <label class="sw"><input type="checkbox" id="sw-aim-1" checked onchange="trigAim(1,'Aim Merah')"><span class="sl"></span></label>
               </div>
 
               <div class="aim-card">
                 <div>
-                  <div class="game-title">Easy Drag (Layar Licin)</div>
-                  <div class="game-sub">Touch Slop 1px, Palm Rejection Off & Fast Multi-Touch</div>
+                  <div class="game-title">Easy Drag (Geser Sedikit Licin)</div>
+                  <div class="game-sub">XArena Touch Sensitivity 100 + Touch Slop 0px + Multi-Touch 55ms</div>
                 </div>
                 <label class="sw"><input type="checkbox" id="sw-aim-2" checked onchange="trigAim(2,'Easy Drag')"><span class="sl"></span></label>
               </div>
 
               <div class="aim-card">
                 <div>
-                  <div class="game-title">Smooth Aim</div>
-                  <div class="game-sub">EGL SwapInterval 0 + Zero Frame Backpressure</div>
+                  <div class="game-title">Smooth Aim (Unlock 90/120 FPS)</div>
+                  <div class="game-sub">Bypass Limit 58 FPS XArena + EGL SwapInterval 0</div>
                 </div>
                 <label class="sw"><input type="checkbox" id="sw-aim-3" checked onchange="trigAim(3,'Smooth Aim')"><span class="sl"></span></label>
               </div>
@@ -858,21 +904,21 @@ jobs:
               <div class="aim-card">
                 <div>
                   <div class="game-title">Aim Legit</div>
-                  <div class="game-sub">Auto-Watcher: Mengunci Thread FF Setiap 5 Detik di In-Game</div>
+                  <div class="game-sub">Auto-Watcher: Cegah XArena Me-reset Aim & Grafik di In-Game</div>
                 </div>
                 <label class="sw"><input type="checkbox" id="sw-aim-4" checked onchange="trigAim(4,'Aim Legit')"><span class="sl"></span></label>
               </div>
 
               <div class="slider-card">
                 <div class="slider-head">
-                  <span>Sensitivitas Geser In-Game (1 - 7)</span>
-                  <span class="slider-val-txt" id="sensi-txt">Level 7 (Max Licin)</span>
+                  <span>Sensitivitas Sistem FF (1 - 7)</span>
+                  <span class="slider-val-txt" id="sensi-txt">Level 7 (Super Licin)</span>
                 </div>
                 <input type="range" min="1" max="7" step="1" value="7" class="range-styled" id="sensi-slider" oninput="onSensiSlide(this.value)" onchange="onSensiChange(this.value)">
                 <div class="ticks-row">
                   <span>1 (Standar)</span>
                   <span>4 (Cepat)</span>
-                  <span class="active">7 (Super Licin)</span>
+                  <span class="active">7 (Geser Sedikit Licin)</span>
                 </div>
               </div>
 
@@ -1011,7 +1057,7 @@ jobs:
               }
 
               function onSensiSlide(val) {
-                document.getElementById('sensi-txt').innerText = 'Level ' + val + (val == 7 ? ' (Max Licin)' : '');
+                document.getElementById('sensi-txt').innerText = 'Level ' + val + (val == 7 ? ' (Super Licin)' : '');
               }
 
               function onSensiChange(val) {
@@ -1020,17 +1066,17 @@ jobs:
               }
 
               function getKeys() {
-                const r = localStorage.getItem('danz_v13_keys');
+                const r = localStorage.getItem('danz_v14_keys');
                 if (!r) {
                   const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v13_keys', JSON.stringify(d));
+                  localStorage.setItem('danz_v14_keys', JSON.stringify(d));
                   return d;
                 }
                 return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v13_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v14_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -1104,8 +1150,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V13 APK
+      - name: Upload DANZSTRAIGHT V14 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V13-DIRECT-FF
+          name: DANZSTRAIGHT-V14-XARENA-BYPASS
           path: clean_apk/app/build/outputs/apk/debug/*.apk
