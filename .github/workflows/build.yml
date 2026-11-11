@@ -19,27 +19,143 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Compile Real Android APK
+      - name: Build Floating Mod Menu APK
         run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          if ! gradle assembleDebug --no-daemon; then
-            mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
-            echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
-            echo 'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }' > clean_apk/settings.gradle
-            echo 'dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }' >> clean_apk/settings.gradle
-            echo 'rootProject.name = "DANZSTRAIGHT"' >> clean_apk/settings.gradle
-            echo 'include ":app"' >> clean_apk/settings.gradle
-            echo 'plugins { id "com.android.application" version "8.2.0" }' > clean_apk/app/build.gradle
-            echo 'android { namespace "com.danzstraight.mod"; compileSdk 34; defaultConfig { applicationId "com.danzstraight.mod"; minSdk 24; targetSdk 34; versionCode 1; versionName "1.0" } }' >> clean_apk/app/build.gradle
-            echo '<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="DANZSTRAIGHT" android:theme="@android:style/Theme.DeviceDefault.NoActionBar"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>' > clean_apk/app/src/main/AndroidManifest.xml
-            echo 'package com.danzstraight.mod; import android.app.Activity; import android.os.Bundle; import android.widget.TextView; import android.view.Gravity; public class MainActivity extends Activity { @Override protected void onCreate(Bundle s) { super.onCreate(s); TextView tv = new TextView(this); tv.setText("DANZSTRAIGHT ACTIVE"); tv.setTextSize(20); tv.setGravity(Gravity.CENTER); setContentView(tv); } }' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
-            cd clean_apk && gradle assembleDebug --no-daemon
-          fi
+          mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
+          
+          # Membuat struktur Gradle
+          cat << 'EOF' > clean_apk/settings.gradle
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = "DANZSTRAIGHT"
+          include ":app"
+          EOF
+          
+          cat << 'EOF' > clean_apk/app/build.gradle
+          plugins { id "com.android.application" version "8.2.0" }
+          android { 
+            namespace "com.danzstraight.mod"
+            compileSdk 34
+            defaultConfig { applicationId "com.danzstraight.mod"; minSdk 24; targetSdk 34; versionCode 1; versionName "1.0" } 
+          }
+          EOF
+          
+          # Membuat Izin Melayang di AndroidManifest
+          cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+              <application android:label="DANZSTRAIGHT" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <service android:name=".FloatingService" android:exported="false"/>
+              </application>
+          </manifest>
+          EOF
+          
+          # Kode untuk Meminta Izin di HP
+          cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
+          package com.danzstraight.mod;
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.widget.Toast;
 
-      - name: Upload Compiled APK
+          public class MainActivity extends Activity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  if (!Settings.canDrawOverlays(this)) {
+                      Toast.makeText(this, "Izinkan tampil di atas aplikasi lain ya boss!", Toast.LENGTH_LONG).show();
+                      startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())), 1);
+                  } else {
+                      startService(new Intent(this, FloatingService.class));
+                      finish();
+                  }
+              }
+              @Override
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  if (requestCode == 1 && Settings.canDrawOverlays(this)) {
+                      startService(new Intent(this, FloatingService.class));
+                      finish();
+                  }
+              }
+          }
+          EOF
+          
+          # Kode untuk Tampilan Tombol Mod Melayang
+          cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/FloatingService.java
+          package com.danzstraight.mod;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.graphics.PixelFormat;
+          import android.os.IBinder;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.widget.Button;
+
+          public class FloatingService extends Service {
+              private WindowManager wm;
+              private Button floatBtn;
+              @Override
+              public IBinder onBind(Intent intent) { return null; }
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+                  floatBtn = new Button(this);
+                  floatBtn.setText("DANZ MOD");
+                  floatBtn.setBackgroundColor(Color.RED);
+                  floatBtn.setTextColor(Color.WHITE);
+                  
+                  WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT);
+                  params.gravity = Gravity.TOP | Gravity.LEFT;
+                  params.x = 0; params.y = 200;
+                  
+                  floatBtn.setOnTouchListener(new View.OnTouchListener() {
+                      int initialX, initialY;
+                      float initialTouchX, initialTouchY;
+                      @Override
+                      public boolean onTouch(View v, MotionEvent event) {
+                          switch (event.getAction()) {
+                              case MotionEvent.ACTION_DOWN:
+                                  initialX = params.x; initialY = params.y;
+                                  initialTouchX = event.getRawX(); initialTouchY = event.getRawY();
+                                  return true;
+                              case MotionEvent.ACTION_MOVE:
+                                  params.x = initialX + (int)(event.getRawX() - initialTouchX);
+                                  params.y = initialY + (int)(event.getRawY() - initialTouchY);
+                                  wm.updateViewLayout(floatBtn, params);
+                                  return true;
+                          }
+                          return false;
+                      }
+                  });
+                  wm.addView(floatBtn, params);
+              }
+          }
+          EOF
+          
+          # Mulai Kompilasi
+          echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
+          cd clean_apk && gradle assembleDebug --no-daemon
+
+      - name: Upload Mod Menu APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-APK
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            clean_apk/app/build/outputs/apk/debug/*.apk
+          name: DANZSTRAIGHT-MOD-MENU
+          path: clean_apk/app/build/outputs/apk/debug/*.apk
