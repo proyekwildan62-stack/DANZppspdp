@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V17 Clean 5 Features
+name: Build DANZSTRAIGHT V19 Max Slippery Sensi
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V17 APK
+      - name: Build DANZSTRAIGHT V19 APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -47,8 +47,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 170
-              versionName "17.0"
+              versionCode 190
+              versionName "19.0"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -93,7 +93,7 @@ jobs:
           </manifest>
           EOF
 
-          # MainActivity V17: Anti-Mental + Injeksi Sistem Free Fire (5 Fitur Murni)
+          # MainActivity V19: Extreme Sensivity Gamelab (Tetap Licin Walau Sensi FF 0) + 6 Fitur Sistem FF
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -123,8 +123,10 @@ jobs:
               private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
               private final Handler mainHandler = new Handler(Looper.getMainLooper());
               private boolean cleanedOnce = false;
+              private boolean inGameLoopActive = false;
 
               private boolean featAim = false;
+              private boolean featAimDrag = false;
               private boolean featEasyDrag = false;
               private boolean featSmoothAim = false;
               private boolean featAimLegit = false;
@@ -137,7 +139,7 @@ jobs:
                       if (ok) {
                           Toast.makeText(MainActivity.this, "Shizuku Terhubung!", Toast.LENGTH_SHORT).show();
                           webView.evaluateJavascript("setShizukuStatus(true)", null);
-                          cleanOldHooksOnce();
+                          cleanCrashLeftoversOnce();
                       } else {
                           Toast.makeText(MainActivity.this, "Izin Shizuku Ditolak", Toast.LENGTH_LONG).show();
                       }
@@ -166,13 +168,13 @@ jobs:
 
               @Override
               protected void onDestroy() {
+                  inGameLoopActive = false;
                   Shizuku.removeRequestPermissionResultListener(PERM_LISTENER);
                   bgExecutor.shutdownNow();
                   super.onDestroy();
               }
 
-              // Hanya dijalankan 1 kali saat awal konek Shizuku untuk menghapus sisa pengaturan lama penyebab mental
-              private void cleanOldHooksOnce() {
+              private void cleanCrashLeftoversOnce() {
                   if (cleanedOnce) return;
                   cleanedOnce = true;
                   StringBuilder clean = new StringBuilder();
@@ -198,20 +200,59 @@ jobs:
                   executeShizukuSilent(clean.toString());
               }
 
-              // Membangun script injeksi sistem Free Fire yang 100% aman (tidak memicu force-close / mental)
-              private String buildSafeFFSystemScript() {
+              // Daemon Penjaga In-Game: Menjaga kelicinan ekstrem & Aim tetap mengunci proses Free Fire setiap 4 detik
+              private void startInGameDaemon() {
+                  if (inGameLoopActive) return;
+                  inGameLoopActive = true;
+                  Runnable loop = new Runnable() {
+                      @Override
+                      public void run() {
+                          if (!inGameLoopActive) return;
+                          if (featAim || featAimDrag || featEasyDrag || featSmoothAim || featAimLegit || featSensiGamelab) {
+                              executeShizukuSilent(buildFFInjectionCommands());
+                          }
+                          mainHandler.postDelayed(this, 4000);
+                      }
+                  };
+                  mainHandler.postDelayed(loop, 3500);
+              }
+
+              // Membangun perintah injeksi langsung ke Sistem Input & Proses Internal Free Fire
+              private String buildFFInjectionCommands() {
                   StringBuilder cmd = new StringBuilder();
 
-                  // 1. Aim
+                  // 1. AIM (Akurasi Titik Bidik & Prioritas Mode Performa FF)
                   if (featAim) {
-                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
                       cmd.append("settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n");
                       cmd.append("settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n");
                       cmd.append("cmd appops set com.dts.freefireth RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
                       cmd.append("cmd appops set com.dts.freefiremax RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode performance com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode performance com.dts.freefiremax >/dev/null 2>&1\n");
                   }
 
-                  // 2. Easy Drag
+                  // 2. AIM DRAG (Tarikan Pendek Langsung Kepala & Anti Lewat Kepala seperti di Video)
+                  if (featAimDrag) {
+                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n");
+                      cmd.append("setprop view.minimum_fling_velocity 1 >/dev/null 2>&1\n");
+                      // Jika Sensivity Gamelab tidak sedang dimentokkan ke 7, kunci batas atas fling di 24000 agar pas di kepala
+                      if (!featSensiGamelab || sensiLevel < 7) {
+                          cmd.append("setprop view.maximum_fling_velocity 24000 >/dev/null 2>&1\n");
+                          cmd.append("setprop view.scroll_friction 0.001 >/dev/null 2>&1\n");
+                      }
+                      cmd.append(
+                          "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
+                          "  echo 1 > /proc/$p/timerslack_ns 2>/dev/null; " +
+                          "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
+                          "    echo 1 > /proc/$p/task/$t/timerslack_ns 2>/dev/null; " +
+                          "  done; " +
+                          "done\n"
+                      );
+                  }
+
+                  // 3. EASY DRAG (Zero Touch Slop / Hapus Beban Geser Awal Tombol Tembak)
                   if (featEasyDrag) {
                       cmd.append("settings put secure touch_slop 0 >/dev/null 2>&1\n");
                       cmd.append("settings put system touch_slop 0 >/dev/null 2>&1\n");
@@ -220,7 +261,7 @@ jobs:
                       cmd.append("settings put secure touch_exploration_enabled 0 >/dev/null 2>&1\n");
                   }
 
-                  // 3. Smooth Aim
+                  // 4. SMOOTH AIM (Buka Kunci 120Hz & Hilangkan Frame Delay)
                   if (featSmoothAim) {
                       cmd.append("settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n");
                       cmd.append("settings put system min_refresh_rate 120.0 >/dev/null 2>&1\n");
@@ -233,7 +274,7 @@ jobs:
                       cmd.append("settings put global animator_duration_scale 0.0 >/dev/null 2>&1\n");
                   }
 
-                  // 4. Aim Legit
+                  // 5. AIM LEGIT (Kunci Stabilitas Proses Free Fire)
                   if (featAimLegit) {
                       cmd.append("cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1\n");
                       cmd.append("cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1\n");
@@ -241,37 +282,67 @@ jobs:
                       cmd.append("am set-standby-bucket com.dts.freefiremax active >/dev/null 2>&1\n");
                   }
 
-                  // 5. Sensivity Gamelab (Level 1 - 7)
+                  // 6. SENSIVITY GAMELAB OVERDRIVE (Level 1 - 7: Saat Dimentokkan ke 7, Sensi 0 di In-Game FF Tetap Super Licin!)
                   if (featSensiGamelab) {
-                      int holdMs = Math.max(55, 195 - (sensiLevel * 20));
-                      int gameSpaceSensi = 30 + (sensiLevel * 10);
-                      int maxEvents = 180 + (sensiLevel * 50);
-                      int flingMax = 12000 + (sensiLevel * 3000);
+                      boolean isMaxOverdrive = (sensiLevel >= 7);
+                      // Pada Level 7, suntikkan nilai Overdrive di atas batas UI standar Android & XArena
+                      int ptrSpeed = isMaxOverdrive ? 14 : sensiLevel;
+                      int holdMs = isMaxOverdrive ? 35 : Math.max(55, 190 - (sensiLevel * 20));
+                      int touchGain = isMaxOverdrive ? 999 : (sensiLevel * 25);
+                      int eventRate = isMaxOverdrive ? 999 : (220 + (sensiLevel * 60));
+                      int maxFling = isMaxOverdrive ? 99999 : (18000 + (sensiLevel * 4000));
 
-                      cmd.append("settings put system pointer_speed ").append(sensiLevel).append(" >/dev/null 2>&1\n");
+                      // Matikan peredam interpolasi sentuhan agar lonjakan gerak jari dibaca 100% mentah oleh UnityMain Free Fire
+                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
                       cmd.append("device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n");
                       cmd.append("device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot deep_press_enabled 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n");
+
+                      // Dorong kecepatan pointer & sensitivitas kapasitif layar ke titik maksimum
+                      cmd.append("settings put system pointer_speed ").append(ptrSpeed).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put secure touch_slop 0 >/dev/null 2>&1\n");
+                      cmd.append("settings put system touch_slop 0 >/dev/null 2>&1\n");
+                      cmd.append("settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n");
                       cmd.append("settings put secure long_press_timeout ").append(holdMs).append(" >/dev/null 2>&1\n");
                       cmd.append("settings put secure multi_press_timeout ").append(holdMs).append(" >/dev/null 2>&1\n");
-                      cmd.append("settings put global game_space_touch_sensitivity ").append(gameSpaceSensi).append(" >/dev/null 2>&1\n");
-                      cmd.append("settings put global game_space_swipe_sensitivity ").append(gameSpaceSensi).append(" >/dev/null 2>&1\n");
+
+                      // Aktifkan High-Gain Capacitive Mode / Glove Mode & XArena Touch Overdrive
+                      cmd.append("settings put system high_touch_sensitivity_enable 1 >/dev/null 2>&1\n");
+                      cmd.append("settings put system auto_adjust_touch 1 >/dev/null 2>&1\n");
+                      cmd.append("settings put system glove_mode 1 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure glove_mode_enabled 1 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure touch_sensitivity_mode 1 >/dev/null 2>&1\n");
                       cmd.append("settings put system touch_game_mode 1 >/dev/null 2>&1\n");
-                      cmd.append("settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1\n");
-                      cmd.append("settings put system touch_sensitivity 1 >/dev/null 2>&1\n");
-                      cmd.append("setprop windowsmgr.max_events_per_sec ").append(maxEvents).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put system game_mode_touch_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put system touch_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put global game_space_touch_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put global game_space_swipe_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put system tran_game_touch_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put system tran_game_swipe_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
+
+                      // Hilangkan gesekan layar (0 friction) & maksimalkan laju pengiriman sampel sentuh ke Free Fire
+                      cmd.append("setprop windowsmgr.max_events_per_sec ").append(eventRate).append(" >/dev/null 2>&1\n");
+                      cmd.append("setprop ro.min_pointer_dur 1 >/dev/null 2>&1\n");
+                      cmd.append("setprop debug.touch.slop 0 >/dev/null 2>&1\n");
                       cmd.append("setprop view.scroll_friction 0.0 >/dev/null 2>&1\n");
                       cmd.append("setprop view.minimum_fling_velocity 1 >/dev/null 2>&1\n");
-                      cmd.append("setprop view.maximum_fling_velocity ").append(flingMax).append(" >/dev/null 2>&1\n");
+                      cmd.append("setprop view.maximum_fling_velocity ").append(maxFling).append(" >/dev/null 2>&1\n");
                   }
 
-                  // Suntikkan prioritas CPU secara aman ke proses Free Fire jika sedang berjalan
-                  if (featAim || featEasyDrag || featAimLegit || featSensiGamelab) {
-                      int niceVal = -(sensiLevel * 2 + 4);
+                  // Suntikkan prioritas tertinggi (-20) & timerslack 1ns ke seluruh thread internal Free Fire
+                  if (featAim || featAimDrag || featEasyDrag || featAimLegit || featSensiGamelab) {
+                      int niceVal = (featAimDrag || (featSensiGamelab && sensiLevel >= 7)) ? -20 : -(sensiLevel * 2 + 4);
                       cmd.append(
                           "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
                           "  renice -n " + niceVal + " -p $p >/dev/null 2>&1; " +
+                          "  ionice -c 1 -n 0 -p $p >/dev/null 2>&1; " +
+                          "  echo 1 > /proc/$p/timerslack_ns 2>/dev/null; " +
                           "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
                           "    renice -n " + niceVal + " -p $t >/dev/null 2>&1; " +
+                          "    taskset -p ff $t >/dev/null 2>&1; " +
+                          "    echo 1 > /proc/$p/task/$t/timerslack_ns 2>/dev/null; " +
                           "  done; " +
                           "done\n"
                       );
@@ -281,6 +352,7 @@ jobs:
               }
 
               private void executeShizukuSilent(String script) {
+                  if (script == null || script.isEmpty()) return;
                   bgExecutor.execute(() -> {
                       try {
                           if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) return;
@@ -350,7 +422,7 @@ jobs:
                               }
                               if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                                   webView.evaluateJavascript("setShizukuStatus(true)", null);
-                                  cleanOldHooksOnce();
+                                  cleanCrashLeftoversOnce();
                               } else {
                                   Shizuku.requestPermission(101);
                               }
@@ -377,17 +449,23 @@ jobs:
                       else if (id == 3) featSmoothAim = on;
                       else if (id == 4) featAimLegit = on;
                       else if (id == 5) featSensiGamelab = on;
+                      else if (id == 6) featAimDrag = on;
 
-                      String script = buildSafeFFSystemScript();
+                      startInGameDaemon();
+                      String script = buildFFInjectionCommands();
                       if (script.isEmpty()) {
                           script = "settings put system pointer_speed 0 >/dev/null 2>&1\n";
                       }
-                      executeShizukuClean(script, name + (on ? " Aktif" : " Nonaktif"));
+                      String msg = (id == 5 && on && sensi >= 7)
+                          ? "Sensivity Gamelab MAX (Sensi 0 FF Tetap Licin)!"
+                          : (name + (on ? " Aktif" : " Nonaktif"));
+                      executeShizukuClean(script, msg);
                   }
 
                   @JavascriptInterface
                   public void resetDefault() {
                       featAim = false;
+                      featAimDrag = false;
                       featEasyDrag = false;
                       featSmoothAim = false;
                       featAimLegit = false;
@@ -396,6 +474,8 @@ jobs:
                           "device_config delete input_native_boot velocitytracker_strategy >/dev/null 2>&1\n" +
                           "device_config delete input_native_boot resample_touch >/dev/null 2>&1\n" +
                           "settings put system pointer_speed 0 >/dev/null 2>&1\n" +
+                          "settings put system high_touch_sensitivity_enable 0 >/dev/null 2>&1\n" +
+                          "settings put system glove_mode 0 >/dev/null 2>&1\n" +
                           "settings delete secure touch_slop >/dev/null 2>&1\n" +
                           "settings put secure long_press_timeout 400 >/dev/null 2>&1\n" +
                           "settings put secure multi_press_timeout 300 >/dev/null 2>&1\n" +
@@ -410,19 +490,18 @@ jobs:
                       runOnUiThread(() -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show());
                   }
 
-                  // Membuka Free Fire dengan mulus tanpa perintah yang mematikan proses game
                   @JavascriptInterface
                   public void launchFreeFire() {
                       runOnUiThread(() -> {
+                          startInGameDaemon();
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
                           if (i != null) {
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
-                              // Tunggu 5 detik setelah Free Fire terbuka, lalu suntikkan prioritas & pelicin layar secara halus
                               mainHandler.postDelayed(() -> {
-                                  executeShizukuSilent(buildSafeFFSystemScript());
+                                  executeShizukuSilent(buildFFInjectionCommands());
                               }, 5000);
                           } else {
                               Toast.makeText(MainActivity.this, "Silakan buka aplikasi Free Fire", Toast.LENGTH_LONG).show();
@@ -433,7 +512,7 @@ jobs:
           }
           EOF
 
-          # Antarmuka V17: Hanya 5 Fitur Sesuai Permintaan Tanpa Tambahan Nama
+          # Antarmuka V19: 6 Fitur Bersih Sesuai Permintaan
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -505,7 +584,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZ<span>STRAIGHT</span></div>
-                <div class="brand-sub">Shizuku Free Fire System Injector v17.0</div>
+                <div class="brand-sub">Shizuku Free Fire System Injector v19.0</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -536,7 +615,7 @@ jobs:
               <button class="btn-rst" onclick="resetAllUI()">Reset</button>
             </div>
 
-            <!-- 5 FITUR UTAMA SESUAI NAMA PERMINTAAN -->
+            <!-- DAFTAR 6 FITUR UTAMA -->
             <!-- 1. Aim -->
             <div class="feat-card" id="card-1">
               <div class="feat-top">
@@ -545,7 +624,15 @@ jobs:
               </div>
             </div>
 
-            <!-- 2. Easy Drag -->
+            <!-- 2. Aim Drag -->
+            <div class="feat-card" id="card-6">
+              <div class="feat-top">
+                <div class="feat-title">Aim Drag</div>
+                <label class="sw"><input type="checkbox" id="sw-6" onchange="trigMod(6,'Aim Drag')"><span class="sl"></span></label>
+              </div>
+            </div>
+
+            <!-- 3. Easy Drag -->
             <div class="feat-card" id="card-2">
               <div class="feat-top">
                 <div class="feat-title">Easy Drag</div>
@@ -553,7 +640,7 @@ jobs:
               </div>
             </div>
 
-            <!-- 3. Smooth Aim -->
+            <!-- 4. Smooth Aim -->
             <div class="feat-card" id="card-3">
               <div class="feat-top">
                 <div class="feat-title">Smooth Aim</div>
@@ -561,7 +648,7 @@ jobs:
               </div>
             </div>
 
-            <!-- 4. Aim Legit -->
+            <!-- 5. Aim Legit -->
             <div class="feat-card" id="card-4">
               <div class="feat-top">
                 <div class="feat-title">Aim Legit</div>
@@ -569,7 +656,7 @@ jobs:
               </div>
             </div>
 
-            <!-- 5. Sensivity Gamelab -->
+            <!-- 6. Sensivity Gamelab -->
             <div class="feat-card" id="card-5">
               <div class="feat-top">
                 <div class="feat-title">Sensivity Gamelab</div>
@@ -578,7 +665,7 @@ jobs:
               <div class="sensi-Control">
                 <div class="row-sb" style="margin:0">
                   <span style="color:var(--muted)">Level Sensivity</span>
-                  <b style="color:var(--accent)" id="sensi-txt">7</b>
+                  <b style="color:var(--accent)" id="sensi-txt">7 (MAX OVERDRIVE)</b>
                 </div>
                 <input type="range" min="1" max="7" step="1" value="7" class="range-styled" id="sensi-slider" oninput="onSensiSlide(this.value)" onchange="onSensiChange(this.value)">
               </div>
@@ -628,7 +715,7 @@ jobs:
               }
 
               function onSensiSlide(val) {
-                document.getElementById('sensi-txt').innerText = val;
+                document.getElementById('sensi-txt').innerText = (val == 7) ? "7 (MAX OVERDRIVE)" : val;
               }
 
               function onSensiChange(val) {
@@ -640,25 +727,27 @@ jobs:
               }
 
               function resetAllUI() {
-                for (let i = 1; i <= 5; i++) {
-                  document.getElementById('sw-' + i).checked = false;
-                  document.getElementById('card-' + i).classList.remove('on');
-                }
+                [1, 2, 3, 4, 5, 6].forEach(i => {
+                  const sw = document.getElementById('sw-' + i);
+                  const card = document.getElementById('card-' + i);
+                  if (sw) sw.checked = false;
+                  if (card) card.classList.remove('on');
+                });
                 AndroidBridge.resetDefault();
               }
 
               function getKeys() {
-                const r = localStorage.getItem('danz_v17_keys');
+                const r = localStorage.getItem('danz_v19_keys');
                 if (!r) {
                   const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v17_keys', JSON.stringify(d));
+                  localStorage.setItem('danz_v19_keys', JSON.stringify(d));
                   return d;
                 }
                 return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v17_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v19_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -733,8 +822,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V17 APK
+      - name: Upload DANZSTRAIGHT V19 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V17-CLEAN
+          name: DANZSTRAIGHT-V19-MAX-SLIPPERY
           path: clean_apk/app/build/outputs/apk/debug/*.apk
