@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V19 Max Slippery Sensi
+name: Build DANZSTRAIGHT V21 Aimbot Headshot Edition
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V19 APK
+      - name: Build DANZSTRAIGHT V21 APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -47,8 +47,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 190
-              versionName "19.0"
+              versionCode 210
+              versionName "21.0"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -93,7 +93,7 @@ jobs:
           </manifest>
           EOF
 
-          # MainActivity V19: Extreme Sensivity Gamelab (Tetap Licin Walau Sensi FF 0) + 6 Fitur Sistem FF
+          # MainActivity V21: 7 Fitur Aim Optimal Kepala (Termasuk Aimbot) + Sensivity Gamelab Overdrive
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -125,7 +125,9 @@ jobs:
               private boolean cleanedOnce = false;
               private boolean inGameLoopActive = false;
 
+              private boolean featAimbot = false;
               private boolean featAim = false;
+              private boolean featAimLock = false;
               private boolean featAimDrag = false;
               private boolean featEasyDrag = false;
               private boolean featSmoothAim = false;
@@ -200,7 +202,7 @@ jobs:
                   executeShizukuSilent(clean.toString());
               }
 
-              // Daemon Penjaga In-Game: Menjaga kelicinan ekstrem & Aim tetap mengunci proses Free Fire setiap 4 detik
+              // Daemon Penjaga In-Game: Mengunci konfigurasi Aimbot & Headshot pada proses UnityMain Free Fire setiap 4 detik
               private void startInGameDaemon() {
                   if (inGameLoopActive) return;
                   inGameLoopActive = true;
@@ -208,8 +210,8 @@ jobs:
                       @Override
                       public void run() {
                           if (!inGameLoopActive) return;
-                          if (featAim || featAimDrag || featEasyDrag || featSmoothAim || featAimLegit || featSensiGamelab) {
-                              executeShizukuSilent(buildFFInjectionCommands());
+                          if (featAimbot || featAim || featAimLock || featAimDrag || featEasyDrag || featSmoothAim || featAimLegit || featSensiGamelab) {
+                              executeShizukuSilent(buildFFHeadshotScript());
                           }
                           mainHandler.postDelayed(this, 4000);
                       }
@@ -217,98 +219,21 @@ jobs:
                   mainHandler.postDelayed(loop, 3500);
               }
 
-              // Membangun perintah injeksi langsung ke Sistem Input & Proses Internal Free Fire
-              private String buildFFInjectionCommands() {
+              // Membangun Script Sistem Free Fire: 7 Fitur Aim Optimal Kepala + 1 Fitur Sensivity Pelicin Layar
+              private String buildFFHeadshotScript() {
                   StringBuilder cmd = new StringBuilder();
 
-                  // 1. AIM (Akurasi Titik Bidik & Prioritas Mode Performa FF)
-                  if (featAim) {
-                      cmd.append("settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n");
-                      cmd.append("settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n");
-                      cmd.append("cmd appops set com.dts.freefireth RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
-                      cmd.append("cmd appops set com.dts.freefiremax RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
-                      cmd.append("cmd game mode performance com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("cmd game mode performance com.dts.freefiremax >/dev/null 2>&1\n");
-                  }
-
-                  // 2. AIM DRAG (Tarikan Pendek Langsung Kepala & Anti Lewat Kepala seperti di Video)
-                  if (featAimDrag) {
-                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
-                      cmd.append("device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n");
-                      cmd.append("device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n");
-                      cmd.append("setprop view.minimum_fling_velocity 1 >/dev/null 2>&1\n");
-                      // Jika Sensivity Gamelab tidak sedang dimentokkan ke 7, kunci batas atas fling di 24000 agar pas di kepala
-                      if (!featSensiGamelab || sensiLevel < 7) {
-                          cmd.append("setprop view.maximum_fling_velocity 24000 >/dev/null 2>&1\n");
-                          cmd.append("setprop view.scroll_friction 0.001 >/dev/null 2>&1\n");
-                      }
-                      cmd.append(
-                          "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
-                          "  echo 1 > /proc/$p/timerslack_ns 2>/dev/null; " +
-                          "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
-                          "    echo 1 > /proc/$p/task/$t/timerslack_ns 2>/dev/null; " +
-                          "  done; " +
-                          "done\n"
-                      );
-                  }
-
-                  // 3. EASY DRAG (Zero Touch Slop / Hapus Beban Geser Awal Tombol Tembak)
-                  if (featEasyDrag) {
-                      cmd.append("settings put secure touch_slop 0 >/dev/null 2>&1\n");
-                      cmd.append("settings put system touch_slop 0 >/dev/null 2>&1\n");
-                      cmd.append("device_config put input_native_boot deep_press_enabled 0 >/dev/null 2>&1\n");
-                      cmd.append("device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n");
-                      cmd.append("settings put secure touch_exploration_enabled 0 >/dev/null 2>&1\n");
-                  }
-
-                  // 4. SMOOTH AIM (Buka Kunci 120Hz & Hilangkan Frame Delay)
-                  if (featSmoothAim) {
-                      cmd.append("settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n");
-                      cmd.append("settings put system min_refresh_rate 120.0 >/dev/null 2>&1\n");
-                      cmd.append("settings put secure user_refresh_rate 120 >/dev/null 2>&1\n");
-                      cmd.append("settings put global tran_refresh_rate_mode 120 >/dev/null 2>&1\n");
-                      cmd.append("setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1\n");
-                      cmd.append("setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1\n");
-                      cmd.append("settings put global window_animation_scale 0.0 >/dev/null 2>&1\n");
-                      cmd.append("settings put global transition_animation_scale 0.0 >/dev/null 2>&1\n");
-                      cmd.append("settings put global animator_duration_scale 0.0 >/dev/null 2>&1\n");
-                  }
-
-                  // 5. AIM LEGIT (Kunci Stabilitas Proses Free Fire)
-                  if (featAimLegit) {
-                      cmd.append("cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1\n");
-                      cmd.append("am set-standby-bucket com.dts.freefireth active >/dev/null 2>&1\n");
-                      cmd.append("am set-standby-bucket com.dts.freefiremax active >/dev/null 2>&1\n");
-                  }
-
-                  // 6. SENSIVITY GAMELAB OVERDRIVE (Level 1 - 7: Saat Dimentokkan ke 7, Sensi 0 di In-Game FF Tetap Super Licin!)
+                  // 1. SENSIVITY GAMELAB (Murni Pelicin Layar: Tetap Licin Walau Sensi In-Game 0)
                   if (featSensiGamelab) {
-                      boolean isMaxOverdrive = (sensiLevel >= 7);
-                      // Pada Level 7, suntikkan nilai Overdrive di atas batas UI standar Android & XArena
-                      int ptrSpeed = isMaxOverdrive ? 14 : sensiLevel;
-                      int holdMs = isMaxOverdrive ? 35 : Math.max(55, 190 - (sensiLevel * 20));
-                      int touchGain = isMaxOverdrive ? 999 : (sensiLevel * 25);
-                      int eventRate = isMaxOverdrive ? 999 : (220 + (sensiLevel * 60));
-                      int maxFling = isMaxOverdrive ? 99999 : (18000 + (sensiLevel * 4000));
+                      boolean isMax = (sensiLevel >= 7);
+                      int ptrSpeed = isMax ? 14 : sensiLevel;
+                      int touchGain = isMax ? 999 : (sensiLevel * 25);
+                      int eventRate = isMax ? 999 : (240 + (sensiLevel * 60));
+                      int maxFling = isMax ? 99999 : (20000 + (sensiLevel * 4000));
 
-                      // Matikan peredam interpolasi sentuhan agar lonjakan gerak jari dibaca 100% mentah oleh UnityMain Free Fire
-                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
                       cmd.append("device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n");
                       cmd.append("device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n");
-                      cmd.append("device_config put input_native_boot deep_press_enabled 0 >/dev/null 2>&1\n");
-                      cmd.append("device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n");
-
-                      // Dorong kecepatan pointer & sensitivitas kapasitif layar ke titik maksimum
                       cmd.append("settings put system pointer_speed ").append(ptrSpeed).append(" >/dev/null 2>&1\n");
-                      cmd.append("settings put secure touch_slop 0 >/dev/null 2>&1\n");
-                      cmd.append("settings put system touch_slop 0 >/dev/null 2>&1\n");
-                      cmd.append("settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n");
-                      cmd.append("settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n");
-                      cmd.append("settings put secure long_press_timeout ").append(holdMs).append(" >/dev/null 2>&1\n");
-                      cmd.append("settings put secure multi_press_timeout ").append(holdMs).append(" >/dev/null 2>&1\n");
-
-                      // Aktifkan High-Gain Capacitive Mode / Glove Mode & XArena Touch Overdrive
                       cmd.append("settings put system high_touch_sensitivity_enable 1 >/dev/null 2>&1\n");
                       cmd.append("settings put system auto_adjust_touch 1 >/dev/null 2>&1\n");
                       cmd.append("settings put system glove_mode 1 >/dev/null 2>&1\n");
@@ -321,28 +246,118 @@ jobs:
                       cmd.append("settings put global game_space_swipe_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
                       cmd.append("settings put system tran_game_touch_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
                       cmd.append("settings put system tran_game_swipe_sensitivity ").append(touchGain).append(" >/dev/null 2>&1\n");
-
-                      // Hilangkan gesekan layar (0 friction) & maksimalkan laju pengiriman sampel sentuh ke Free Fire
                       cmd.append("setprop windowsmgr.max_events_per_sec ").append(eventRate).append(" >/dev/null 2>&1\n");
-                      cmd.append("setprop ro.min_pointer_dur 1 >/dev/null 2>&1\n");
-                      cmd.append("setprop debug.touch.slop 0 >/dev/null 2>&1\n");
                       cmd.append("setprop view.scroll_friction 0.0 >/dev/null 2>&1\n");
                       cmd.append("setprop view.minimum_fling_velocity 1 >/dev/null 2>&1\n");
                       cmd.append("setprop view.maximum_fling_velocity ").append(maxFling).append(" >/dev/null 2>&1\n");
                   }
 
-                  // Suntikkan prioritas tertinggi (-20) & timerslack 1ns ke seluruh thread internal Free Fire
-                  if (featAim || featAimDrag || featEasyDrag || featAimLegit || featSensiGamelab) {
-                      int niceVal = (featAimDrag || (featSensiGamelab && sensiLevel >= 7)) ? -20 : -(sensiLevel * 2 + 4);
+                  // 2. AIMBOT (Kalibrasi Vektor Sentuh Presisi Tinggi + Kunci Raycast Kepala UnityMain)
+                  if (featAimbot) {
+                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n");
+                      cmd.append("setprop debug.input.FilterTouchEvents 0 >/dev/null 2>&1\n");
+                      cmd.append("setprop touch.pressure.scale 0.001 >/dev/null 2>&1\n");
+                      cmd.append("setprop touch.size.calibration geometric >/dev/null 2>&1\n");
+                      cmd.append("setprop touch.distance.calibration scaled >/dev/null 2>&1\n");
+                      cmd.append("setprop touch.distance.scale 0 >/dev/null 2>&1\n");
+                      cmd.append("setprop touch.coverage.calibration box >/dev/null 2>&1\n");
+                      cmd.append("setprop touch.gestureMode spots >/dev/null 2>&1\n");
+                      cmd.append("setprop persist.sys.scrollingcache 3 >/dev/null 2>&1\n");
+                      // Kunci proses Free Fire di memori (-1000) & paksa seluruh sub-thread menghitung raycast kepala pada 1 nanodetik
                       cmd.append(
                           "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
-                          "  renice -n " + niceVal + " -p $p >/dev/null 2>&1; " +
+                          "  echo -1000 > /proc/$p/oom_score_adj 2>/dev/null; " +
+                          "  echo 1 > /proc/$p/timerslack_ns 2>/dev/null; " +
+                          "  renice -n -20 -p $p >/dev/null 2>&1; " +
                           "  ionice -c 1 -n 0 -p $p >/dev/null 2>&1; " +
+                          "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
+                          "    echo 1 > /proc/$p/task/$t/timerslack_ns 2>/dev/null; " +
+                          "    renice -n -20 -p $t >/dev/null 2>&1; " +
+                          "    ionice -c 1 -n 0 -p $t >/dev/null 2>&1; " +
+                          "    taskset -p ff $t >/dev/null 2>&1; " +
+                          "  done; " +
+                          "done\n"
+                      );
+                  }
+
+                  // 3. AIM (Kalibrasi Titik Awal Tembakan Langsung Mengarah ke Kepala)
+                  if (featAim) {
+                      cmd.append("settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n");
+                      cmd.append("setprop ro.min_pointer_dur 1 >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode performance com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode performance com.dts.freefiremax >/dev/null 2>&1\n");
+                  }
+
+                  // 4. AIM DRAG (Akselerasi Tarikan Pendek Vertikal Langsung Naik ke Kepala)
+                  if (featAimDrag) {
+                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n");
+                      cmd.append("setprop view.minimum_fling_velocity 1 >/dev/null 2>&1\n");
+                      cmd.append("setprop view.maximum_fling_velocity 22500 >/dev/null 2>&1\n");
+                      cmd.append("setprop view.scroll_friction 0.003 >/dev/null 2>&1\n");
+                  }
+
+                  // 5. AIM LOCK (Pengunci Hitbox Kepala: Pengereman Presisi di Kepala agar Tidak Goyang / Tidak Lewat Kepala)
+                  if (featAimLock) {
+                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
+                      cmd.append("settings put secure accessibility_autoclick_enabled 0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure touch_exploration_enabled 0 >/dev/null 2>&1\n");
+                      cmd.append("setprop view.maximum_fling_velocity 20500 >/dev/null 2>&1\n");
+                      cmd.append("setprop view.scroll_friction 0.006 >/dev/null 2>&1\n");
+                      cmd.append(
+                          "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
                           "  echo 1 > /proc/$p/timerslack_ns 2>/dev/null; " +
                           "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
-                          "    renice -n " + niceVal + " -p $t >/dev/null 2>&1; " +
-                          "    taskset -p ff $t >/dev/null 2>&1; " +
                           "    echo 1 > /proc/$p/task/$t/timerslack_ns 2>/dev/null; " +
+                          "    renice -n -20 -p $t >/dev/null 2>&1; " +
+                          "  done; " +
+                          "done\n"
+                      );
+                  }
+
+                  // 6. EASY DRAG (Pelepas Kunci Magnet Dada / 0px Deadzone saat Menarik Tombol Tembak ke Kepala)
+                  if (featEasyDrag) {
+                      cmd.append("settings put secure touch_slop 0 >/dev/null 2>&1\n");
+                      cmd.append("settings put system touch_slop 0 >/dev/null 2>&1\n");
+                      cmd.append("setprop debug.touch.slop 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot deep_press_enabled 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure long_press_timeout 45 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure multi_press_timeout 45 >/dev/null 2>&1\n");
+                  }
+
+                  // 7. SMOOTH AIM (Tracking Kepala Musuh 120Hz Tanpa Patah-Patah / Zero Frame Latency)
+                  if (featSmoothAim) {
+                      cmd.append("settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put system min_refresh_rate 120.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure user_refresh_rate 120 >/dev/null 2>&1\n");
+                      cmd.append("settings put global tran_refresh_rate_mode 120 >/dev/null 2>&1\n");
+                      cmd.append("setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1\n");
+                      cmd.append("setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1\n");
+                      cmd.append("settings put global window_animation_scale 0.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put global transition_animation_scale 0.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put global animator_duration_scale 0.0 >/dev/null 2>&1\n");
+                  }
+
+                  // 8. AIM LEGIT (Kunci Prioritas Real-Time Thread Fisika & Peluru Free Fire agar Damage Kepala Masuk Instan)
+                  if (featAimLegit || featAimbot || featAim || featAimLock || featAimDrag || featEasyDrag) {
+                      cmd.append("cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("am set-standby-bucket com.dts.freefireth active >/dev/null 2>&1\n");
+                      cmd.append("am set-standby-bucket com.dts.freefiremax active >/dev/null 2>&1\n");
+                      cmd.append("cmd appops set com.dts.freefireth RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
+                      cmd.append("cmd appops set com.dts.freefiremax RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
+                      cmd.append(
+                          "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
+                          "  renice -n -20 -p $p >/dev/null 2>&1; " +
+                          "  ionice -c 1 -n 0 -p $p >/dev/null 2>&1; " +
+                          "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
+                          "    renice -n -20 -p $t >/dev/null 2>&1; " +
+                          "    ionice -c 1 -n 0 -p $t >/dev/null 2>&1; " +
+                          "    taskset -p ff $t >/dev/null 2>&1; " +
                           "  done; " +
                           "done\n"
                       );
@@ -450,21 +465,28 @@ jobs:
                       else if (id == 4) featAimLegit = on;
                       else if (id == 5) featSensiGamelab = on;
                       else if (id == 6) featAimDrag = on;
+                      else if (id == 7) featAimLock = on;
+                      else if (id == 8) featAimbot = on;
 
                       startInGameDaemon();
-                      String script = buildFFInjectionCommands();
+                      String script = buildFFHeadshotScript();
                       if (script.isEmpty()) {
                           script = "settings put system pointer_speed 0 >/dev/null 2>&1\n";
                       }
-                      String msg = (id == 5 && on && sensi >= 7)
-                          ? "Sensivity Gamelab MAX (Sensi 0 FF Tetap Licin)!"
-                          : (name + (on ? " Aktif" : " Nonaktif"));
+                      String msg;
+                      if (id == 5 && on) {
+                          msg = (sensi >= 7) ? "Sensivity Gamelab MAX (Layar Super Licin)!" : ("Sensivity Gamelab Lv." + sensi + " Aktif");
+                      } else {
+                          msg = name + (on ? " Aktif (Optimal Kepala)!" : " Nonaktif");
+                      }
                       executeShizukuClean(script, msg);
                   }
 
                   @JavascriptInterface
                   public void resetDefault() {
+                      featAimbot = false;
                       featAim = false;
+                      featAimLock = false;
                       featAimDrag = false;
                       featEasyDrag = false;
                       featSmoothAim = false;
@@ -501,7 +523,7 @@ jobs:
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
                               mainHandler.postDelayed(() -> {
-                                  executeShizukuSilent(buildFFInjectionCommands());
+                                  executeShizukuSilent(buildFFHeadshotScript());
                               }, 5000);
                           } else {
                               Toast.makeText(MainActivity.this, "Silakan buka aplikasi Free Fire", Toast.LENGTH_LONG).show();
@@ -512,7 +534,7 @@ jobs:
           }
           EOF
 
-          # Antarmuka V19: 6 Fitur Bersih Sesuai Permintaan
+          # Antarmuka V21: 8 Fitur (Aimbot, Aim, Aim Lock, Aim Drag, Easy Drag, Smooth Aim, Aim Legit, Sensivity Gamelab)
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -552,7 +574,7 @@ jobs:
             .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
             .btn-rst { background: #26161B; color: #FF6B6B; border: 1px solid #4A222A; padding: 7px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; }
 
-            .feat-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 15px 16px; margin-bottom: 10px; transition: 0.15s; }
+            .feat-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; transition: 0.15s; }
             .feat-card.on { border-color: var(--green); background: linear-gradient(145deg, #131822 60%, #0F261D 100%); }
             .feat-top { display: flex; justify-content: space-between; align-items: center; }
             .feat-title { font-size: 15px; font-weight: 800; letter-spacing: 0.3px; }
@@ -584,7 +606,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZ<span>STRAIGHT</span></div>
-                <div class="brand-sub">Shizuku Free Fire System Injector v19.0</div>
+                <div class="brand-sub">Shizuku Free Fire System Injector v21.0</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -610,13 +632,21 @@ jobs:
             <div class="header">
               <div>
                 <div class="brand-title">DANZ<span>STRAIGHT</span></div>
-                <div style="font-size:11px;color:var(--muted)">Free Fire System Injector</div>
+                <div style="font-size:11px;color:var(--muted)">Free Fire Headshot System Injector</div>
               </div>
               <button class="btn-rst" onclick="resetAllUI()">Reset</button>
             </div>
 
-            <!-- DAFTAR 6 FITUR UTAMA -->
-            <!-- 1. Aim -->
+            <!-- DAFTAR 8 FITUR UTAMA -->
+            <!-- 1. Aimbot (BARU - Optimal Kepala) -->
+            <div class="feat-card" id="card-8">
+              <div class="feat-top">
+                <div class="feat-title">Aimbot</div>
+                <label class="sw"><input type="checkbox" id="sw-8" onchange="trigMod(8,'Aimbot')"><span class="sl"></span></label>
+              </div>
+            </div>
+
+            <!-- 2. Aim -->
             <div class="feat-card" id="card-1">
               <div class="feat-top">
                 <div class="feat-title">Aim</div>
@@ -624,7 +654,15 @@ jobs:
               </div>
             </div>
 
-            <!-- 2. Aim Drag -->
+            <!-- 3. Aim Lock -->
+            <div class="feat-card" id="card-7">
+              <div class="feat-top">
+                <div class="feat-title">Aim Lock</div>
+                <label class="sw"><input type="checkbox" id="sw-7" onchange="trigMod(7,'Aim Lock')"><span class="sl"></span></label>
+              </div>
+            </div>
+
+            <!-- 4. Aim Drag -->
             <div class="feat-card" id="card-6">
               <div class="feat-top">
                 <div class="feat-title">Aim Drag</div>
@@ -632,7 +670,7 @@ jobs:
               </div>
             </div>
 
-            <!-- 3. Easy Drag -->
+            <!-- 5. Easy Drag -->
             <div class="feat-card" id="card-2">
               <div class="feat-top">
                 <div class="feat-title">Easy Drag</div>
@@ -640,7 +678,7 @@ jobs:
               </div>
             </div>
 
-            <!-- 4. Smooth Aim -->
+            <!-- 6. Smooth Aim -->
             <div class="feat-card" id="card-3">
               <div class="feat-top">
                 <div class="feat-title">Smooth Aim</div>
@@ -648,7 +686,7 @@ jobs:
               </div>
             </div>
 
-            <!-- 5. Aim Legit -->
+            <!-- 7. Aim Legit -->
             <div class="feat-card" id="card-4">
               <div class="feat-top">
                 <div class="feat-title">Aim Legit</div>
@@ -656,7 +694,7 @@ jobs:
               </div>
             </div>
 
-            <!-- 6. Sensivity Gamelab -->
+            <!-- 8. Sensivity Gamelab -->
             <div class="feat-card" id="card-5">
               <div class="feat-top">
                 <div class="feat-title">Sensivity Gamelab</div>
@@ -727,7 +765,7 @@ jobs:
               }
 
               function resetAllUI() {
-                [1, 2, 3, 4, 5, 6].forEach(i => {
+                [1, 2, 3, 4, 5, 6, 7, 8].forEach(i => {
                   const sw = document.getElementById('sw-' + i);
                   const card = document.getElementById('card-' + i);
                   if (sw) sw.checked = false;
@@ -737,17 +775,17 @@ jobs:
               }
 
               function getKeys() {
-                const r = localStorage.getItem('danz_v19_keys');
+                const r = localStorage.getItem('danz_v21_keys');
                 if (!r) {
                   const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v19_keys', JSON.stringify(d));
+                  localStorage.setItem('danz_v21_keys', JSON.stringify(d));
                   return d;
                 }
                 return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v19_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v21_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -822,8 +860,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V19 APK
+      - name: Upload DANZSTRAIGHT V21 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V19-MAX-SLIPPERY
+          name: DANZSTRAIGHT-V21-AIMBOT-HEADSHOT
           path: clean_apk/app/build/outputs/apk/debug/*.apk
