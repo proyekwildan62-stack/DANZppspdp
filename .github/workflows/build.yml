@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V9.2 Fix Process Error
+name: Build DANZSTRAIGHT V10 Native GLES Hook
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,10 +19,11 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V9.2 APK
+      - name: Build DANZSTRAIGHT V10 APK with libdanz_mc.so
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
+          mkdir -p clean_apk/app/src/main/cpp
           mkdir -p clean_apk/app/src/main/assets
 
           cat << 'EOF' > clean_apk/gradle.properties
@@ -47,8 +48,12 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 92
-              versionName "9.2"
+              versionCode 100
+              versionName "10.0"
+              ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
+            }
+            externalNativeBuild {
+              cmake { path "src/main/cpp/CMakeLists.txt" }
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -61,6 +66,155 @@ jobs:
           }
           EOF
 
+          # 1. CMakeLists untuk merakit mesin OpenGL ES Layer (libdanz_mc.so)
+          cat << 'EOF' > clean_apk/app/src/main/cpp/CMakeLists.txt
+          cmake_minimum_required(VERSION 3.18.1)
+          project("danz_mc")
+          add_library(danz_mc SHARED danz_mc_layer.cpp)
+          target_link_libraries(danz_mc GLESv2 GLESv3 log)
+          EOF
+
+          # 2. Mesin C++ OpenGL ES Hook (Mengubah Tekstur 3D Free Fire menjadi Kotak-Kotak / Minecraft)
+          cat << 'EOF' > clean_apk/app/src/main/cpp/danz_mc_layer.cpp
+          #include <GLES2/gl2.h>
+          #include <GLES3/gl3.h>
+          #include <string.h>
+          #include <stdlib.h>
+          #include <sys/system_properties.h>
+
+          typedef void* (*PFNEGLGETNEXTLAYERPROCADDRESSPROC)(void*, const char*);
+          typedef void (*PFN_glTexParameteri)(GLenum, GLenum, GLint);
+          typedef void (*PFN_glTexParameterf)(GLenum, GLenum, GLfloat);
+          typedef void (*PFN_glSamplerParameteri)(GLuint, GLenum, GLint);
+          typedef void (*PFN_glGenerateMipmap)(GLenum);
+
+          static PFN_glTexParameteri real_glTexParameteri = nullptr;
+          static PFN_glTexParameterf real_glTexParameterf = nullptr;
+          static PFN_glSamplerParameteri real_glSamplerParameteri = nullptr;
+          static PFN_glGenerateMipmap real_glGenerateMipmap = nullptr;
+
+          static int getPropInt(const char* key, int defVal) {
+              char buf[PROP_VALUE_MAX] = {0};
+              if (__system_property_get(key, buf) > 0) return atoi(buf);
+              return defVal;
+          }
+
+          static void hook_glTexParameteri(GLenum target, GLenum pname, GLint param) {
+              if (!real_glTexParameteri) return;
+              int lvl = getPropInt("debug.danz.lvl", 1);
+              int sharp = getPropInt("debug.danz.sharp", 1);
+              int lod = getPropInt("debug.danz.lod", 1);
+
+              if (lvl > 1 && target == GL_TEXTURE_2D) {
+                  if (pname == GL_TEXTURE_MAG_FILTER) {
+                      param = sharp ? GL_NEAREST : GL_LINEAR;
+                  } else if (pname == GL_TEXTURE_MIN_FILTER) {
+                      bool isMipmap = (param >= 0x2700 && param <= 0x2703);
+                      if (isMipmap) {
+                          real_glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, lvl);
+                          if (sharp && lod) param = GL_NEAREST_MIPMAP_NEAREST;
+                          else if (sharp) param = GL_NEAREST_MIPMAP_LINEAR;
+                          else if (lod) param = GL_LINEAR_MIPMAP_NEAREST;
+                      } else if (sharp) {
+                          param = GL_NEAREST;
+                      }
+                  }
+              }
+              real_glTexParameteri(target, pname, param);
+          }
+
+          static void hook_glTexParameterf(GLenum target, GLenum pname, GLfloat param) {
+              if (!real_glTexParameterf) return;
+              int lvl = getPropInt("debug.danz.lvl", 1);
+              int sharp = getPropInt("debug.danz.sharp", 1);
+              int lod = getPropInt("debug.danz.lod", 1);
+
+              if (lvl > 1 && target == GL_TEXTURE_2D) {
+                  GLint iparam = (GLint)param;
+                  if (pname == GL_TEXTURE_MAG_FILTER) {
+                      param = (GLfloat)(sharp ? GL_NEAREST : GL_LINEAR);
+                  } else if (pname == GL_TEXTURE_MIN_FILTER) {
+                      bool isMipmap = (iparam >= 0x2700 && iparam <= 0x2703);
+                      if (isMipmap && real_glTexParameteri) {
+                          real_glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, lvl);
+                          if (sharp && lod) param = (GLfloat)GL_NEAREST_MIPMAP_NEAREST;
+                          else if (sharp) param = (GLfloat)GL_NEAREST_MIPMAP_LINEAR;
+                      } else if (sharp) {
+                          param = (GLfloat)GL_NEAREST;
+                      }
+                  }
+              }
+              real_glTexParameterf(target, pname, param);
+          }
+
+          static void hook_glSamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
+              if (!real_glSamplerParameteri) return;
+              int lvl = getPropInt("debug.danz.lvl", 1);
+              int sharp = getPropInt("debug.danz.sharp", 1);
+              int lod = getPropInt("debug.danz.lod", 1);
+
+              if (lvl > 1) {
+                  if (pname == GL_TEXTURE_MAG_FILTER) {
+                      param = sharp ? GL_NEAREST : GL_LINEAR;
+                  } else if (pname == GL_TEXTURE_MIN_FILTER) {
+                      bool isMipmap = (param >= 0x2700 && param <= 0x2703);
+                      if (isMipmap) {
+                          if (sharp && lod) param = GL_NEAREST_MIPMAP_NEAREST;
+                          else if (sharp) param = GL_NEAREST_MIPMAP_LINEAR;
+                      } else if (sharp) {
+                          param = GL_NEAREST;
+                      }
+                  }
+              }
+              real_glSamplerParameteri(sampler, pname, param);
+          }
+
+          static void hook_glGenerateMipmap(GLenum target) {
+              if (!real_glGenerateMipmap) return;
+              real_glGenerateMipmap(target);
+              int lvl = getPropInt("debug.danz.lvl", 1);
+              int sharp = getPropInt("debug.danz.sharp", 1);
+              if (lvl > 1 && target == GL_TEXTURE_2D && real_glTexParameteri) {
+                  real_glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, lvl);
+                  if (sharp) {
+                      real_glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                      real_glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+                  }
+              }
+          }
+
+          extern "C" __attribute__((visibility("default")))
+          void AndroidGLESLayer_Initialize(void* layer_id, PFNEGLGETNEXTLAYERPROCADDRESSPROC get_next_proc) {
+              real_glTexParameteri = (PFN_glTexParameteri)get_next_proc(layer_id, "glTexParameteri");
+              real_glTexParameterf = (PFN_glTexParameterf)get_next_proc(layer_id, "glTexParameterf");
+              real_glSamplerParameteri = (PFN_glSamplerParameteri)get_next_proc(layer_id, "glSamplerParameteri");
+              real_glGenerateMipmap = (PFN_glGenerateMipmap)get_next_proc(layer_id, "glGenerateMipmap");
+          }
+
+          extern "C" __attribute__((visibility("default")))
+          void* AndroidGLESLayer_GetProcAddress(const char* name, void* next) {
+              if (!name) return next;
+              if (strcmp(name, "glTexParameteri") == 0) {
+                  if (!real_glTexParameteri) real_glTexParameteri = (PFN_glTexParameteri)next;
+                  return (void*)hook_glTexParameteri;
+              }
+              if (strcmp(name, "glTexParameterf") == 0) {
+                  if (!real_glTexParameterf) real_glTexParameterf = (PFN_glTexParameterf)next;
+                  return (void*)hook_glTexParameterf;
+              }
+              if (strcmp(name, "glSamplerParameteri") == 0) {
+                  if (!real_glSamplerParameteri) real_glSamplerParameteri = (PFN_glSamplerParameteri)next;
+                  return (void*)hook_glSamplerParameteri;
+              }
+              if (strcmp(name, "glGenerateMipmap") == 0) {
+                  if (!real_glGenerateMipmap) real_glGenerateMipmap = (PFN_glGenerateMipmap)next;
+                  return (void*)hook_glGenerateMipmap;
+              }
+              return next;
+          }
+          EOF
+
+          # 3. AndroidManifest (extractNativeLibs="true" wajib agar libdanz_mc.so bisa dibaca oleh sistem Free Fire)
           cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -71,6 +225,7 @@ jobs:
               </queries>
               <application 
                   android:label="DANZSTRAIGHT" 
+                  android:extractNativeLibs="true"
                   android:hardwareAccelerated="true"
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
                   <activity 
@@ -93,7 +248,7 @@ jobs:
           </manifest>
           EOF
 
-          # MainActivity: Eksekutor Subshell Instan (Bebas Error "process hasn't exited")
+          # 4. MainActivity: Eksekutor Shizuku Tanpa Bug "process hasn't exited" & Tanpa Terputus Prematur
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -112,14 +267,14 @@ jobs:
           import android.webkit.WebViewClient;
           import android.widget.Toast;
           import java.lang.reflect.Method;
-          import java.util.Locale;
           import java.util.concurrent.ExecutorService;
           import java.util.concurrent.Executors;
           import rikka.shizuku.Shizuku;
 
           public class MainActivity extends Activity {
+              static { System.loadLibrary("danz_mc"); }
               private WebView webView;
-              private final ExecutorService bgExecutor = Executors.newCachedThreadPool();
+              private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
@@ -160,8 +315,21 @@ jobs:
                   super.onDestroy();
               }
 
-              // Menjalankan perintah lewat subshell non-blocking agar selesai instan tanpa "process hasn't exited"
-              private void runShizukuInstant(String rawCommands, String successMsg) {
+              private String getInstalledFFPackage() {
+                  PackageManager pm = getPackageManager();
+                  try {
+                      pm.getPackageInfo("com.dts.freefireth", 0);
+                      return "com.dts.freefireth";
+                  } catch (Exception ignored) {}
+                  try {
+                      pm.getPackageInfo("com.dts.freefiremax", 0);
+                      return "com.dts.freefiremax";
+                  } catch (Exception ignored) {}
+                  return "com.dts.freefireth";
+              }
+
+              // Menjalankan perintah Shizuku secara utuh sampai selesai tanpa error "process hasn't exited"
+              private void executeShizukuClean(String script, String toastMsg) {
                   bgExecutor.execute(() -> {
                       try {
                           if (!Shizuku.pingBinder()) {
@@ -175,29 +343,34 @@ jobs:
                               runOnUiThread(() -> {
                                   webView.evaluateJavascript("onSaveComplete()", null);
                                   Shizuku.requestPermission(101);
-                                  Toast.makeText(MainActivity.this, "Klik Izinkan pada pop-up Shizuku", Toast.LENGTH_LONG).show();
+                                  Toast.makeText(MainActivity.this, "Izinkan pop-up Shizuku terlebih dahulu", Toast.LENGTH_LONG).show();
                               });
                               return;
                           }
 
-                          String inlineCmd = "( " + rawCommands.trim().replace("\n", "; ") + " ) >/dev/null 2>&1 &";
                           Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                           m.setAccessible(true);
-                          java.lang.Process p = (java.lang.Process) m.invoke(null, new String[]{"sh", "-c", inlineCmd}, null, null);
+                          java.lang.Process p = (java.lang.Process) m.invoke(
+                              null,
+                              new String[]{"sh", "-c", script + "\nexit 0"},
+                              null,
+                              null
+                          );
+                          try { p.getOutputStream().close(); } catch (Exception ignored) {}
+                          try { p.getInputStream().close(); } catch (Exception ignored) {}
+                          try { p.getErrorStream().close(); } catch (Exception ignored) {}
 
-                          try { p.waitFor(); } catch ( Throwable ignored ) {}
-                          try { p.destroy(); } catch ( Throwable ignored ) {}
+                          // p.waitFor() tanpa parameter menunggu proses selesai secara alami tanpa memanggil exitValue()
+                          p.waitFor();
 
                           runOnUiThread(() -> {
                               webView.evaluateJavascript("onSaveComplete()", null);
-                              if (successMsg != null && !successMsg.isEmpty()) {
-                                  Toast.makeText(MainActivity.this, successMsg, Toast.LENGTH_SHORT).show();
-                              }
+                              Toast.makeText(MainActivity.this, toastMsg, Toast.LENGTH_SHORT).show();
                           });
                       } catch (Throwable e) {
                           runOnUiThread(() -> {
                               webView.evaluateJavascript("onSaveComplete()", null);
-                              Toast.makeText(MainActivity.this, "Aktif (Subshell Mode)", Toast.LENGTH_SHORT).show();
+                              Toast.makeText(MainActivity.this, "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show();
                           });
                       }
                   });
@@ -240,63 +413,87 @@ jobs:
                       });
                   }
 
+                  // INJEKSI LANGSUNG KE SISTEM FREE FIRE (libdanz_mc.so + am compat + game_overlay)
                   @JavascriptInterface
                   public void applyGraphicStudio(boolean enableTex, int texLevel, boolean sharpPixel, boolean hardLod, boolean enableLight, int resPercent) {
+                      String ffPkg = getInstalledFFPackage();
                       StringBuilder cmd = new StringBuilder();
 
-                      cmd.append("am force-stop com.dts.freefireth\n");
-                      cmd.append("am force-stop com.dts.freefiremax\n");
+                      // 1. Bersihkan flag compat lama agar tidak bentrok
+                      String[] compatFlags = {"DOWNSCALE_90","DOWNSCALE_85","DOWNSCALE_80","DOWNSCALE_75","DOWNSCALE_70","DOWNSCALE_65","DOWNSCALE_60","DOWNSCALE_55","DOWNSCALE_50","DOWNSCALE_45","DOWNSCALE_40","DOWNSCALE_35","DOWNSCALE_30"};
+                      for (String f : compatFlags) {
+                          cmd.append("am compat reset ").append(f).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                          cmd.append("am compat reset ").append(f).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+                      }
 
                       if (!enableTex && !enableLight) {
-                          cmd.append("device_config delete game_overlay com.dts.freefireth\n");
-                          cmd.append("device_config delete game_overlay com.dts.freefiremax\n");
-                          cmd.append("cmd game reset com.dts.freefireth\n");
-                          cmd.append("cmd game reset com.dts.freefiremax\n");
-                          cmd.append("settings delete global angle_gl_driver_selection_pkgs\n");
-                          cmd.append("settings delete global angle_gl_driver_selection_values\n");
-                          cmd.append("settings delete global updatable_driver_production_opt_in_apps\n");
-                          runShizukuInstant(cmd.toString(), "Grafik Free Fire Direset ke Asli!");
+                          cmd.append("am compat reset DOWNSCALED com.dts.freefireth >/dev/null 2>&1\n");
+                          cmd.append("am compat reset DOWNSCALED com.dts.freefiremax >/dev/null 2>&1\n");
+                          cmd.append("device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n");
+                          cmd.append("device_config delete game_overlay com.dts.freefiremax >/dev/null 2>&1\n");
+                          cmd.append("cmd game reset com.dts.freefireth >/dev/null 2>&1\n");
+                          cmd.append("cmd game reset com.dts.freefiremax >/dev/null 2>&1\n");
+                          cmd.append("setprop debug.danz.lvl 1\n");
+                          cmd.append("settings delete global enable_gpu_debug_layers >/dev/null 2>&1\n");
+                          cmd.append("settings delete global gpu_debug_app >/dev/null 2>&1\n");
+                          cmd.append("settings delete global gpu_debug_layers_gles >/dev/null 2>&1\n");
+                          cmd.append("am force-stop com.dts.freefireth >/dev/null 2>&1\n");
+                          cmd.append("am force-stop com.dts.freefiremax >/dev/null 2>&1\n");
+                          executeShizukuClean(cmd.toString(), "Sistem Free Fire Direset ke Asli!");
                           return;
                       }
 
-                      double scale = 1.0;
-                      if (enableLight) {
-                          scale = resPercent / 100.0;
+                      // 2. Aktifkan OpenGL ES Layer (libdanz_mc.so) untuk Tekstur Kotak-Kotak
+                      if (enableTex && texLevel > 1) {
+                          cmd.append("setprop debug.danz.lvl ").append(texLevel).append("\n");
+                          cmd.append("setprop debug.danz.sharp ").append(sharpPixel ? 1 : 0).append("\n");
+                          cmd.append("setprop debug.danz.lod ").append(hardLod ? 1 : 0).append("\n");
+                          cmd.append("settings put global enable_gpu_debug_layers 1 >/dev/null 2>&1\n");
+                          cmd.append("settings put global gpu_debug_app ").append(ffPkg).append(" >/dev/null 2>&1\n");
+                          cmd.append("settings put global gpu_debug_layer_app com.danzstraight.mod >/dev/null 2>&1\n");
+                          cmd.append("settings put global gpu_debug_layers_gles libdanz_mc.so >/dev/null 2>&1\n");
+                      } else {
+                          cmd.append("setprop debug.danz.lvl 1\n");
                       }
+
+                      // 3. Hitung skala kelipatan 5% resmi AOSP (0.30 s/d 0.90) agar diterima oleh semua HP (Infinix, Xiaomi, Oppo, dll)
+                      int targetPct = enableLight ? resPercent : 90;
                       if (enableTex) {
-                          double texScale = 1.0 - ((texLevel - 1) * 0.14);
-                          if (texScale < scale) scale = texScale;
-
-                          if (sharpPixel) {
-                              cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
-                              cmd.append("settings put global angle_gl_driver_selection_values angle,angle\n");
-                          } else {
-                              cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
-                              cmd.append("settings put global angle_gl_driver_selection_values native,native\n");
-                          }
-
-                          if (hardLod) {
-                              cmd.append("settings put global updatable_driver_production_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
-                          } else {
-                              cmd.append("settings delete global updatable_driver_production_opt_in_apps\n");
-                          }
+                          int texPct = 90;
+                          if (texLevel == 2) texPct = 75;
+                          else if (texLevel == 3) texPct = 60;
+                          else if (texLevel == 4) texPct = 45;
+                          else if (texLevel == 5) texPct = 30;
+                          if (texPct < targetPct) targetPct = texPct;
                       }
 
-                      String factorStr = String.format(Locale.US, "%.2f", Math.max(0.35, Math.min(1.0, scale)));
-                      String useAngle = sharpPixel ? ",useAngle=true" : "";
+                      String compatName = "DOWNSCALE_" + targetPct;
+                      String factorStr = (targetPct % 10 == 0) ? ("0." + (targetPct / 10)) : ("0." + targetPct);
 
-                      cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=")
-                         .append(factorStr).append(",fps=120,loadingBoost=99999999").append(useAngle)
-                         .append(":mode=3,downscaleFactor=").append(factorStr).append(",fps=120").append(useAngle).append("\n");
+                      // 4. Suntikkan lewat am compat (Bekerja di SEMUA ROM Android 11-16)
+                      cmd.append("am compat enable DOWNSCALED com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("am compat enable DOWNSCALED com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("am compat enable ").append(compatName).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("am compat enable ").append(compatName).append(" com.dts.freefiremax >/dev/null 2>&1\n");
 
-                      cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=")
-                         .append(factorStr).append(",fps=120,loadingBoost=99999999").append(useAngle)
-                         .append(":mode=3,downscaleFactor=").append(factorStr).append(",fps=120").append(useAngle).append("\n");
+                      // 5. Suntikkan ke SEMUA mode game_overlay (mode 1, 2, dan 3) tanpa flag FPS yang bikin error
+                      String overlayRule = "mode=1,downscaleFactor=" + factorStr + ":mode=2,downscaleFactor=" + factorStr + ":mode=3,downscaleFactor=" + factorStr;
+                      cmd.append("device_config put game_overlay com.dts.freefireth ").append(overlayRule).append(" >/dev/null 2>&1\n");
+                      cmd.append("device_config put game_overlay com.dts.freefiremax ").append(overlayRule).append(" >/dev/null 2>&1\n");
 
-                      cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefireth\n");
-                      cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefiremax\n");
+                      // 6. Jalankan perintah cmd game untuk Android 12 & Android 13/14
+                      cmd.append("cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("cmd game downscale ").append(factorStr).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game downscale ").append(factorStr).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" com.dts.freefiremax >/dev/null 2>&1\n");
 
-                      runShizukuInstant(cmd.toString(), "Berhasil Disimpan! Silakan buka Free Fire.");
+                      // 7. Hentikan proses Free Fire agar saat dibuka langsung memuat konfigurasi baru
+                      cmd.append("am force-stop com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("am force-stop com.dts.freefiremax >/dev/null 2>&1\n");
+
+                      executeShizukuClean(cmd.toString(), "Tersimpan ke Sistem FF (" + targetPct + "%)! Silakan buka Free Fire.");
                   }
 
                   @JavascriptInterface
@@ -304,39 +501,37 @@ jobs:
                       StringBuilder cmd = new StringBuilder();
                       if (id == 1) { // Aim Merah (Drag HS)
                           if (on) {
-                              cmd.append("cmd game mode performance com.dts.freefireth\n");
-                              cmd.append("cmd game mode performance com.dts.freefiremax\n");
-                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; done\n");
+                              cmd.append("cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n");
+                              cmd.append("cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n");
+                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p >/dev/null 2>&1; done\n");
                           }
                       } else if (id == 2) { // Easy Drag
                           if (on) {
-                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done\n");
-                              cmd.append("cmd activity send-trim-memory com.dts.freefireth RUNNING_LOW\n");
-                              cmd.append("cmd activity send-trim-memory com.dts.freefiremax RUNNING_LOW\n");
+                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do ionice -c 1 -n 0 -p $p >/dev/null 2>&1; taskset -p -a ff $p >/dev/null 2>&1; done\n");
                           }
                       } else if (id == 3) { // Smooth Aim
                           if (on) {
-                              cmd.append("settings put global game_driver_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
-                              cmd.append("am set-standby-bucket com.dts.freefireth active\n");
-                              cmd.append("am set-standby-bucket com.dts.freefiremax active\n");
+                              cmd.append("settings put global game_driver_opt_in_apps com.dts.freefireth,com.dts.freefiremax >/dev/null 2>&1\n");
+                              cmd.append("am set-standby-bucket com.dts.freefireth active >/dev/null 2>&1\n");
+                              cmd.append("am set-standby-bucket com.dts.freefiremax active >/dev/null 2>&1\n");
                           } else {
-                              cmd.append("settings delete global game_driver_opt_in_apps\n");
+                              cmd.append("settings delete global game_driver_opt_in_apps >/dev/null 2>&1\n");
                           }
                       } else if (id == 4) { // Aim Legit
                           if (on) {
-                              cmd.append("cmd deviceidle whitelist +com.dts.freefireth\n");
-                              cmd.append("cmd deviceidle whitelist +com.dts.freefiremax\n");
-                              cmd.append("cmd appops set com.dts.freefireth RUN_IN_BACKGROUND allow\n");
-                              cmd.append("cmd appops set com.dts.freefiremax RUN_IN_BACKGROUND allow\n");
+                              cmd.append("cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1\n");
+                              cmd.append("cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1\n");
+                              cmd.append("cmd appops set com.dts.freefireth RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
+                              cmd.append("cmd appops set com.dts.freefiremax RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
                           }
                       } else if (id == 5) { // Sensitivitas Proses FF (1-7)
                           int niceVal = -(sensi * 2 + 4);
                           if (on) {
-                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n ").append(niceVal).append(" -p $p; done\n");
+                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n ").append(niceVal).append(" -p $p >/dev/null 2>&1; done\n");
                           }
                       }
 
-                      runShizukuInstant(cmd.toString(), name + (on ? " Aktif!" : " Nonaktif"));
+                      executeShizukuClean(cmd.toString(), name + (on ? " Aktif di Sistem FF!" : " Nonaktif"));
                   }
 
                   @JavascriptInterface
@@ -354,11 +549,11 @@ jobs:
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
                               new android.os.Handler().postDelayed(() -> {
-                                  runShizukuInstant(
-                                      "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done",
-                                      "DANZSTRAIGHT Terhubung ke In-Game Free Fire!"
+                                  executeShizukuClean(
+                                      "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p >/dev/null 2>&1; ionice -c 1 -n 0 -p $p >/dev/null 2>&1; taskset -p -a ff $p >/dev/null 2>&1; done",
+                                      "DANZSTRAIGHT V10 Aktif di In-Game Free Fire!"
                                   );
-                              }, 3500);
+                              }, 4000);
                           } else {
                               Toast.makeText(MainActivity.this, "Silakan buka aplikasi Free Fire", Toast.LENGTH_LONG).show();
                           }
@@ -506,7 +701,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZSTRAIGHT</div>
-                <div class="brand-sub">Graphic Studio & Shizuku System v9.2</div>
+                <div class="brand-sub">Native OpenGL Layer & Shizuku v10.0</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -553,7 +748,7 @@ jobs:
               <div class="game-bar">
                 <div>
                   <div class="game-title">Free Fire</div>
-                  <div class="game-sub">Aktifkan untuk Free Fire</div>
+                  <div class="game-sub">Aktifkan untuk Free Fire (libdanz_mc.so)</div>
                 </div>
                 <label class="sw"><input type="checkbox" id="sw-ff-tex" checked><span class="sl"></span></label>
               </div>
@@ -840,17 +1035,17 @@ jobs:
               }
 
               function getKeys() {
-                const r = localStorage.getItem('danz_v9_keys');
+                const r = localStorage.getItem('danz_v10_keys');
                 if (!r) {
                   const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v9_keys', JSON.stringify(d));
+                  localStorage.setItem('danz_v10_keys', JSON.stringify(d));
                   return d;
                 }
                 return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v9_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v10_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -924,8 +1119,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V9.2 APK
+      - name: Upload DANZSTRAIGHT V10 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V9-2-FIXED
+          name: DANZSTRAIGHT-V10-GLES-HOOK
           path: clean_apk/app/build/outputs/apk/debug/*.apk
