@@ -1,59 +1,457 @@
-name: Inject DANZSTRAIGHT ke Free Fire
+name: Build DANZSTRAIGHT Optimizer APK
 on: [push, workflow_dispatch]
 
 jobs:
-  inject-apk:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Download Apktool & Signer
-        run: |
-          wget -q https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.9.3.jar -O apktool.jar
-          wget -q https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar -O signer.jar
+      - name: Setup Gradle 8.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.5'
 
-      - name: Bongkar (Decompile) APK Free Fire
+      - name: Generate DANZSTRAIGHT Purple Neon APK
         run: |
-          # Pastikan file ff-ori.apk sudah kamu upload ke repo GitHub kamu
-          if [ ! -f "ff-ori.apk" ]; then
-            echo "Error: File ff-ori.apk tidak ditemukan di repositori!"
-            exit 1
-          fi
-          java -jar apktool.jar d ff-ori.apk -o decompiled_ff -f
+          mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
+          mkdir -p clean_apk/app/src/main/assets
 
-      - name: Suntikkan (Inject) Mod
-        run: |
-          # Membuat folder library jika belum ada
-          mkdir -p decompiled_ff/lib/arm64-v8a
-          mkdir -p decompiled_ff/lib/armeabi-v7a
-          
-          # Menyalin file mod libDANZ.so ke dalam APK gamenya
-          # Pastikan file libDANZ.so sudah kamu upload ke repo GitHub
-          if [ -f "libDANZ.so" ]; then
-            cp libDANZ.so decompiled_ff/lib/arm64-v8a/
-            cp libDANZ.so decompiled_ff/lib/armeabi-v7a/
-            echo "Berhasil menyuntikkan mod ke dalam game!"
-          else
-            echo "Peringatan: File libDANZ.so tidak ditemukan, injeksi dilewati."
-          fi
+          cat << 'EOF' > clean_apk/settings.gradle
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = "DANZSTRAIGHT"
+          include ":app"
+          EOF
 
-      - name: Rakit Ulang (Recompile) APK
-        run: |
-          java -jar apktool.jar b decompiled_ff -o ff-mod-unsigned.apk
+          cat << 'EOF' > clean_apk/app/build.gradle
+          plugins { id "com.android.application" version "8.2.0" }
+          android { 
+            namespace "com.danzstraight.mod"
+            compileSdk 34
+            defaultConfig { 
+              applicationId "com.danzstraight.mod"
+              minSdk 24
+              targetSdk 34
+              versionCode 1
+              versionName "1.0.0" 
+            } 
+          }
+          EOF
 
-      - name: Sign APK (Agar bisa diinstal)
-        run: |
-          java -jar signer.jar -a ff-mod-unsigned.apk --out final_apk/
+          cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <queries>
+                  <package android:name="com.dts.freefireth" />
+                  <package android:name="com.dts.freefiremax" />
+              </queries>
+              <application 
+                  android:label="DANZSTRAIGHT" 
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity 
+                      android:name=".MainActivity" 
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
 
-      - name: Upload APK Hasil Inject
+          # Membuat Tampilan UI Neon Ungu Persis Gambar
+          cat << 'EOF' > clean_apk/app/src/main/assets/index.html
+          <!DOCTYPE html>
+          <html lang="id">
+          <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+          <title>DANZSTRAIGHT</title>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, sans-serif; user-select: none; }
+            body { background: radial-gradient(circle at top, #1f093d 0%, #090414 60%, #05020a 100%); color: #fff; min-height: 100vh; padding: 14px; padding-bottom: 85px; }
+            
+            /* Header */
+            .header { display: flex; align-items: center; justify-content: space-between; padding: 10px 6px 16px; border-bottom: 1px solid #5a189a88; margin-bottom: 14px; }
+            .crown { font-size: 32px; filter: drop-shadow(0 0 8px #9d4edd); }
+            .title-box { text-align: center; }
+            .title-main { font-size: 24px; font-weight: 900; font-style: italic; letter-spacing: 1.5px; }
+            .title-main span { color: #b5179e; text-shadow: 0 0 12px #9d4edd; color: #c77dff; }
+            .subtitle { font-size: 9px; letter-spacing: 2.5px; color: #ccc; margin-top: 2px; }
+            .header-icons span { font-size: 20px; margin-left: 10px; color: #bbb; cursor: pointer; }
+
+            /* Top Status Bar */
+            .status-bar { display: flex; justify-content: space-between; background: linear-gradient(90deg, #12072b, #240b4c, #12072b); border: 1.5px solid #7b2cbf; border-radius: 14px; padding: 12px; margin-bottom: 16px; box-shadow: 0 0 15px #7b2cbf44; }
+            .status-item { display: flex; align-items: center; gap: 10px; }
+            .icon-green { font-size: 26px; color: #00f5d4; filter: drop-shadow(0 0 6px #00f5d4); }
+            .icon-purple { font-size: 26px; color: #c77dff; filter: drop-shadow(0 0 6px #c77dff); }
+            .st-label { font-size: 14px; font-weight: 700; }
+            .st-sub { font-size: 11px; color: #aaa; margin-top: 2px; }
+            .st-sub b { color: #00f57a; }
+            .fps-val { font-size: 18px; font-weight: 800; color: #00f57a; text-shadow: 0 0 8px #00f57a66; }
+
+            /* Grid 2 Kolom */
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+            .card { background: linear-gradient(145deg, #130924, #0a0514); border: 1.5px solid #5a189a; border-radius: 16px; padding: 12px; position: relative; box-shadow: inset 0 0 12px #3c096c55, 0 4px 10px rgba(0,0,0,0.6); display: flex; flex-direction: column; justify-content: space-between; min-height: 128px; transition: 0.2s; }
+            .card.active-card { border-color: #c77dff; box-shadow: 0 0 15px #9d4edd66, inset 0 0 15px #7b2cbf55; }
+            
+            .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+            .card-icon { font-size: 32px; filter: drop-shadow(0 0 8px #9d4edd); margin-right: 6px; }
+            .card-info { flex: 1; }
+            .card-title { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 4px; }
+            .card-desc { font-size: 10px; color: #b8b8c8; line-height: 1.3; }
+
+            /* Toggle Switch */
+            .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+            .switch input { opacity: 0; width: 0; height: 0; }
+            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #3b334a; transition: .3s; border-radius: 22px; border: 1px solid #665; }
+            .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: #e0e0e0; transition: .3s; border-radius: 50%; }
+            input:checked + .slider { background-color: #9d4edd; border-color: #e0aaff; box-shadow: 0 0 8px #9d4edd; }
+            input:checked + .slider:before { transform: translateX(18px); background-color: #fff; }
+
+            /* Action Buttons inside Card */
+            .card-bottom { display: flex; justify-content: flex-end; margin-top: 10px; }
+            .btn-aktifkan { background: linear-gradient(90deg, #5a189a, #9d4edd); border: 1px solid #c77dff; color: #fff; font-size: 11px; font-weight: 700; padding: 6px 14px; border-radius: 20px; cursor: pointer; display: flex; align-items: center; gap: 5px; box-shadow: 0 0 10px #7b2cbf88; active: scale(0.95); }
+            .btn-aktifkan.done { background: linear-gradient(90deg, #007f5f, #00b4d8); border-color: #80ffdb; box-shadow: 0 0 10px #00f5d488; }
+
+            /* Sensitivity Counter */
+            .sensi-box { display: flex; align-items: center; justify-content: space-between; width: 100%; background: #090412; border: 1px solid #7b2cbf; border-radius: 20px; padding: 2px; }
+            .sensi-btn { background: #5a189a; color: #fff; border: none; width: 28px; height: 24px; border-radius: 16px; font-size: 15px; font-weight: bold; cursor: pointer; }
+            .sensi-val { font-size: 13px; font-weight: 800; color: #fff; }
+
+            /* Graphic Dropdown */
+            .select-mc { background: #1a0933; color: #fff; border: 1px solid #9d4edd; padding: 5px 12px; border-radius: 16px; font-size: 11px; font-weight: 700; outline: none; }
+
+            /* Bottom Status Banner */
+            .banner-row { display: flex; gap: 10px; align-items: stretch; margin-bottom: 10px; }
+            .status-ready { flex: 1.4; background: linear-gradient(90deg, #0d061a, #1b0a36); border: 1.5px solid #5a189a; border-radius: 14px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
+            .check-circle { width: 28px; height: 28px; border-radius: 50%; background: #00e676; color: #000; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 16px; box-shadow: 0 0 10px #00e676; flex-shrink: 0; }
+            .ready-text { font-size: 12px; font-weight: 800; color: #00e676; }
+            .ver-text { font-size: 10px; color: #ccc; margin-top: 2px; }
+
+            .play-banner { flex: 1; background: linear-gradient(135deg, #3c096c, #7b2cbf, #5a189a); border: 1.5px solid #e0aaff; border-radius: 14px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; cursor: pointer; box-shadow: 0 0 15px #9d4edd88; }
+            .play-banner span { font-size: 13px; font-weight: 900; font-style: italic; color: #e0aaff; text-shadow: 0 0 8px #000; line-height: 1.1; }
+
+            /* Bottom Navigation */
+            .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 64px; background: #090414ee; border-top: 1.5px solid #7b2cbf; display: flex; justify-content: space-around; align-items: center; backdrop-filter: blur(8px); z-index: 99; }
+            .nav-item { display: flex; flex-direction: column; align-items: center; color: #888; font-size: 11px; cursor: pointer; }
+            .nav-item.active { color: #c77dff; text-shadow: 0 0 8px #9d4edd; font-weight: 700; }
+            .nav-icon { font-size: 20px; margin-bottom: 3px; }
+          </style>
+          </head>
+          <body>
+
+            <!-- HEADER -->
+            <div class="header">
+              <div class="crown">👑</div>
+              <div class="title-box">
+                <div class="title-main">DANZ<span>STRAIGHT</span></div>
+                <div class="subtitle">ULTIMATE GAMING OPTIMIZER</div>
+              </div>
+              <div class="header-icons">
+                <span onclick="notify('Pengaturan Optimizer Stabil')">⚙️</span>
+                <span onclick="notify('DANZSTRAIGHT v1.0.0 Official')">ℹ️</span>
+              </div>
+            </div>
+
+            <!-- STATUS BAR -->
+            <div class="status-bar">
+              <div class="status-item">
+                <div class="icon-green">📱</div>
+                <div>
+                  <div class="st-label" id="android-ver">Android 16</div>
+                  <div class="st-sub">Performa: 🟢 <b>Optimal</b></div>
+                </div>
+              </div>
+              <div class="status-item">
+                <div class="icon-purple">⚡</div>
+                <div>
+                  <div class="st-label">FPS Boost</div>
+                  <div class="fps-val" id="fps-text">+35% 📈</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- GRID FITUR -->
+            <div class="grid">
+              <!-- Card 1: Aim Legit -->
+              <div class="card" id="card-1">
+                <div class="card-top">
+                  <div class="card-icon">🎯</div>
+                  <div class="card-info">
+                    <div class="card-title">Aim Legit</div>
+                    <div class="card-desc">Bidikan lebih stabil dan natural</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="sw-1" onchange="toggleCard(1, 'Aim Legit')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="card-bottom">
+                  <button class="btn-aktifkan" id="btn-1" onclick="activateFeature(1, 'Aim Legit')">Aktifkan ▶</button>
+                </div>
+              </div>
+
+              <!-- Card 2: Aim Trick -->
+              <div class="card" id="card-2">
+                <div class="card-top">
+                  <div class="card-icon">⚡</div>
+                  <div class="card-info">
+                    <div class="card-title">Aim Trick</div>
+                    <div class="card-desc">Flick & tracking lebih mudah</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="sw-2" onchange="toggleCard(2, 'Aim Trick')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="card-bottom">
+                  <button class="btn-aktifkan" id="btn-2" onclick="activateFeature(2, 'Aim Trick')">Aktifkan ▶</button>
+                </div>
+              </div>
+
+              <!-- Card 3: Drag HS -->
+              <div class="card" id="card-3">
+                <div class="card-top">
+                  <div class="card-icon">🥷</div>
+                  <div class="card-info">
+                    <div class="card-title">Drag HS</div>
+                    <div class="card-desc">Geser cepat Headshot</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="sw-3" onchange="toggleCard(3, 'Drag HS')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="card-bottom">
+                  <button class="btn-aktifkan" id="btn-3" onclick="activateFeature(3, 'Drag HS')">Aktifkan ▶</button>
+                </div>
+              </div>
+
+              <!-- Card 4: Sensivity -->
+              <div class="card" id="card-4">
+                <div class="card-top">
+                  <div class="card-icon">🎚️</div>
+                  <div class="card-info">
+                    <div class="card-title">Sensivity</div>
+                    <div class="card-desc">Gamelan 1 - 7</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="sw-4" onchange="toggleCard(4, 'Sensivity Gamelan')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="card-bottom">
+                  <div class="sensi-box">
+                    <button class="sensi-btn" onclick="changeSensi(-1)">−</button>
+                    <span class="sensi-val" id="sensi-num">4</span>
+                    <button class="sensi-btn" onclick="changeSensi(1)">+</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 5: Boost HP -->
+              <div class="card" id="card-5">
+                <div class="card-top">
+                  <div class="card-icon">🚀</div>
+                  <div class="card-info">
+                    <div class="card-title">Boost HP</div>
+                    <div class="card-desc">Performa HP lebih stabil</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="sw-5" onchange="toggleCard(5, 'Boost HP')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="card-bottom">
+                  <button class="btn-aktifkan" id="btn-5" onclick="activateFeature(5, 'Boost HP')">Aktifkan ▶</button>
+                </div>
+              </div>
+
+              <!-- Card 6: Graphic MC -->
+              <div class="card" id="card-6">
+                <div class="card-top">
+                  <div class="card-icon">🟩</div>
+                  <div class="card-info">
+                    <div class="card-title">Graphic MC</div>
+                    <div class="card-desc">Preset Grafis Minecraft</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="sw-6" onchange="toggleCard(6, 'Graphic MC')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="card-bottom">
+                  <select class="select-mc" onchange="notify('Preset Grafis diubah ke: ' + this.value)">
+                    <option value="Ultra">Ultra ▾</option>
+                    <option value="High">High ▾</option>
+                    <option value="Smooth">Smooth ▾</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- STATUS & PLAY BANNER -->
+            <div class="banner-row">
+              <div class="status-ready">
+                <div class="check-circle">✔</div>
+                <div>
+                  <div class="ready-text" id="status-msg">Status : Siap Digunakan</div>
+                  <div class="ver-text">DANZSTRAIGHT v1.0.0</div>
+                </div>
+              </div>
+              <div class="play-banner" onclick="launchGame()">
+                <span>PLAY SMOOTH<br>WIN MORE!</span>
+              </div>
+            </div>
+
+            <!-- BOTTOM NAV -->
+            <div class="bottom-nav">
+              <div class="nav-item active" onclick="notify('Halaman Utama')">
+                <div class="nav-icon">🏠</div>
+                <div>Home</div>
+              </div>
+              <div class="nav-item" onclick="notify('Semua Injeksi Mengikuti Sistem')">
+                <div class="nav-icon">📊</div>
+                <div>Setting</div>
+              </div>
+              <div class="nav-item" onclick="launchGame()">
+                <div class="nav-icon">▶️</div>
+                <div>Play FF</div>
+              </div>
+              <div class="nav-item" onclick="notify('Support Creator DANZSTRAIGHT!')">
+                <div class="nav-icon">⭐</div>
+                <div>Donate</div>
+              </div>
+            </div>
+
+            <script>
+              let sensi = 4;
+              function changeSensi(delta) {
+                sensi = Math.min(7, Math.max(1, sensi + delta));
+                document.getElementById('sensi-num').innerText = sensi;
+                document.getElementById('sw-4').checked = true;
+                document.getElementById('card-4').classList.add('active-card');
+                notify('Sensivity diatur ke level ' + sensi);
+              }
+
+              function toggleCard(id, name) {
+                const sw = document.getElementById('sw-' + id);
+                const card = document.getElementById('card-' + id);
+                const btn = document.getElementById('btn-' + id);
+                if (sw.checked) {
+                  card.classList.add('active-card');
+                  if (btn) { btn.innerText = 'Aktif ✔'; btn.classList.add('done'); }
+                  document.getElementById('status-msg').innerText = name + ' : Diinjeksi!';
+                  notify(name + ' Berhasil Diaktifkan!');
+                } else {
+                  card.classList.remove('active-card');
+                  if (btn) { btn.innerText = 'Aktifkan ▶'; btn.classList.remove('done'); }
+                  document.getElementById('status-msg').innerText = 'Status : Siap Digunakan';
+                  notify(name + ' Dinonaktifkan');
+                }
+              }
+
+              function activateFeature(id, name) {
+                const sw = document.getElementById('sw-' + id);
+                sw.checked = !sw.checked;
+                toggleCard(id, name);
+              }
+
+              function notify(msg) {
+                if (window.AndroidBridge) {
+                  window.AndroidBridge.showToast(msg);
+                }
+              }
+
+              function launchGame() {
+                if (window.AndroidBridge) {
+                  window.AndroidBridge.openFreeFire();
+                }
+              }
+            </script>
+          </body>
+          </html>
+          EOF
+
+          # Membuat Kode Pemanggil Android & Peluncur Otomatis Free Fire
+          cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
+          package com.danzstraight.mod;
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.view.Window;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Toast;
+
+          public class MainActivity extends Activity {
+              private WebView webView;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  requestWindowFeature(Window.FEATURE_NO_TITLE);
+                  getWindow().setStatusBarColor(Color.parseColor("#090414"));
+                  getWindow().setNavigationBarColor(Color.parseColor("#090414"));
+
+                  webView = new WebView(this);
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  webView.setBackgroundColor(Color.parseColor("#090414"));
+                  webView.setWebViewClient(new WebViewClient());
+                  webView.addJavascriptInterface(new WebAppInterface(), "AndroidBridge");
+                  webView.loadUrl("file:///android_asset/index.html");
+                  setContentView(webView);
+              }
+
+              public class WebAppInterface {
+                  @JavascriptInterface
+                  public void showToast(String message) {
+                      runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
+                  }
+
+                  @JavascriptInterface
+                  public void openFreeFire() {
+                      runOnUiThread(() -> {
+                          PackageManager pm = getPackageManager();
+                          Intent launchIntent = pm.getLaunchIntentForPackage("com.dts.freefireth");
+                          if (launchIntent == null) {
+                              launchIntent = pm.getLaunchIntentForPackage("com.dts.freefiremax");
+                          }
+                          if (launchIntent != null) {
+                              Toast.makeText(MainActivity.this, "Menyuntikkan Preset & Membuka Free Fire...", Toast.LENGTH_LONG).show();
+                              startActivity(launchIntent);
+                          } else {
+                              Toast.makeText(MainActivity.this, "Preset Aktif! Silakan buka game Free Fire kamu.", Toast.LENGTH_LONG).show();
+                          }
+                      });
+                  }
+              }
+          }
+          EOF
+
+          echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
+          cd clean_apk && gradle assembleDebug --no-daemon
+
+      - name: Upload DANZSTRAIGHT Optimizer APK
         uses: actions/upload-artifact@v4
         with:
-          name: FREE-FIRE-DANZSTRAIGHT-INJECTED
-          path: final_apk/*.apk
+          name: DANZSTRAIGHT-OPTIMIZER-V1
+          path: clean_apk/app/build/outputs/apk/debug/*.apk
