@@ -14,19 +14,22 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK & Build Tools
-        uses: android-actions/setup-android@v3
-
-      - name: Compile and Build Debug APK
+      - name: Install System Gradle & Tools
         run: |
-          chmod +x gradlew || true
-          ./gradlew assembleDebug || gradle assembleDebug || true
+          sudo apt-get update
+          sudo apt-get install -y gradle
+
+      - name: Generate Gradle Wrapper & Build APK
+        run: |
+          gradle wrapper --gradle-version 8.4
+          chmod +x gradlew
+          ./gradlew assembleDebug || gradle assembleDebug
 
       - name: Upload Compiled APK
         uses: actions/upload-artifact@v4
         with:
           name: DANZSTRAIGHT-APK
           path: |
-            *.apk
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/**/*.apk
+            *.apk
