@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V9 Graphic Studio
+name: Build DANZSTRAIGHT V9.1 Anti-Freeze
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V9 APK
+      - name: Build DANZSTRAIGHT V9.1 APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -47,8 +47,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 90
-              versionName "9.0"
+              versionCode 91
+              versionName "9.1"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -64,8 +64,6 @@ jobs:
           cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <queries>
                   <package android:name="moe.shizuku.privileged.api" />
                   <package android:name="com.dts.freefireth" />
@@ -84,10 +82,6 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-                  <service
-                      android:name=".InGameService"
-                      android:enabled="true"
-                      android:exported="false" />
                   <provider
                       android:name="rikka.shizuku.ShizukuProvider"
                       android:authorities="${applicationId}.shizuku"
@@ -99,43 +93,7 @@ jobs:
           </manifest>
           EOF
 
-          cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/InGameService.java
-          package com.danzstraight.mod;
-          import android.app.Notification;
-          import android.app.NotificationChannel;
-          import android.app.NotificationManager;
-          import android.app.Service;
-          import android.content.Intent;
-          import android.os.Build;
-          import android.os.IBinder;
-          import android.os.Process;
-
-          public class InGameService extends Service {
-              @Override
-              public IBinder onBind(Intent intent) { return null; }
-
-              @Override
-              public int onStartCommand(Intent intent, int flags, int startId) {
-                  Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
-                  String info = intent != null ? intent.getStringExtra("status") : "Preset Grafik & Aim Aktif";
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      String cid = "danz_v9_channel";
-                      NotificationChannel ch = new NotificationChannel(cid, "DANZSTRAIGHT Engine", NotificationManager.IMPORTANCE_LOW);
-                      NotificationManager nm = getSystemService(NotificationManager.class);
-                      if (nm != null) nm.createNotificationChannel(ch);
-                      Notification n = new Notification.Builder(this, cid)
-                              .setContentTitle("DANZSTRAIGHT Aktif untuk Free Fire")
-                              .setContentText(info)
-                              .setSmallIcon(android.R.drawable.ic_media_play)
-                              .setOngoing(true)
-                              .build();
-                      startForeground(101, n);
-                  }
-                  return START_STICKY;
-              }
-          }
-          EOF
-
+          # MainActivity: Asynchronous Shizuku Executor (Anti-Freeze / Tanpa Deadlock)
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -145,7 +103,6 @@ jobs:
           import android.content.Intent;
           import android.content.pm.PackageManager;
           import android.graphics.Color;
-          import android.os.Build;
           import android.os.Bundle;
           import android.provider.Settings;
           import android.view.Window;
@@ -157,10 +114,14 @@ jobs:
           import java.io.OutputStream;
           import java.lang.reflect.Method;
           import java.util.Locale;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+          import java.util.concurrent.TimeUnit;
           import rikka.shizuku.Shizuku;
 
           public class MainActivity extends Activity {
               private WebView webView;
+              private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
@@ -197,38 +158,55 @@ jobs:
               @Override
               protected void onDestroy() {
                   Shizuku.removeRequestPermissionResultListener(PERM_LISTENER);
+                  bgExecutor.shutdownNow();
                   super.onDestroy();
               }
 
-              private String execShizukuShell(String commands) {
-                  try {
-                      if (!Shizuku.pingBinder()) return "ERR: Shizuku belum berjalan";
-                      if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                          Shizuku.requestPermission(101);
-                          return "ERR: Izinkan pop-up Shizuku terlebih dahulu";
-                      }
-                      Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
-                      m.setAccessible(true);
-                      java.lang.Process p = (java.lang.Process) m.invoke(null, new String[]{"sh"}, null, null);
-                      OutputStream os = p.getOutputStream();
-                      os.write((commands + "\nexit\n").getBytes());
-                      os.flush();
-                      os.close();
-                      p.waitFor();
-                      return "OK";
-                  } catch (Exception e) {
-                      return "ERR: " + e.getMessage();
-                  }
-              }
+              // Menjalankan perintah Shizuku di Background Thread dengan Timeout 4 Detik agar tidak pernah macet
+              private void runShizukuAsync(String rawCommands, String successMsg) {
+                  bgExecutor.execute(() -> {
+                      try {
+                          if (!Shizuku.pingBinder()) {
+                              runOnUiThread(() -> Toast.makeText(MainActivity.this, "Shizuku belum berjalan!", Toast.LENGTH_LONG).show());
+                              return;
+                          }
+                          if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                              runOnUiThread(() -> {
+                                  Shizuku.requestPermission(101);
+                                  Toast.makeText(MainActivity.this, "Klik Izinkan pada pop-up Shizuku", Toast.LENGTH_LONG).show();
+                              });
+                              return;
+                          }
 
-              private void startKeepAlive(String msg) {
-                  Intent svc = new Intent(this, InGameService.class);
-                  svc.putExtra("status", msg);
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      startForegroundService(svc);
-                  } else {
-                      startService(svc);
-                  }
+                          Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+                          m.setAccessible(true);
+                          java.lang.Process p = (java.lang.Process) m.invoke(null, new String[]{"sh"}, null, null);
+
+                          OutputStream os = p.getOutputStream();
+                          String safeScript = "{\n" + rawCommands + "\n} >/dev/null 2>&1\nexit\n";
+                          os.write(safeScript.getBytes());
+                          os.flush();
+                          os.close();
+
+                          try { p.getInputStream().close(); } catch (Exception ignored) {}
+                          try { p.getErrorStream().close(); } catch (Exception ignored) {}
+
+                          boolean finished = p.waitFor(4, TimeUnit.SECONDS);
+                          if (!finished) {
+                              p.destroyForcibly();
+                          }
+
+                          runOnUiThread(() -> {
+                              webView.evaluateJavascript("onSaveComplete()", null);
+                              Toast.makeText(MainActivity.this, successMsg, Toast.LENGTH_SHORT).show();
+                          });
+                      } catch (Exception e) {
+                          runOnUiThread(() -> {
+                              webView.evaluateJavascript("onSaveComplete()", null);
+                              Toast.makeText(MainActivity.this, "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                          });
+                      }
+                  });
               }
 
               public class Bridge {
@@ -268,20 +246,13 @@ jobs:
                       });
                   }
 
-                  // SIMPAN PRESET TEKSTUR & MODE RINGAN KHUSUS FREE FIRE (PERSIS FOTO 1 & 2)
                   @JavascriptInterface
-                  public String applyGraphicStudio(boolean enableTex, int texLevel, boolean sharpPixel, boolean hardLod, boolean enableLight, int resPercent) {
+                  public void applyGraphicStudio(boolean enableTex, int texLevel, boolean sharpPixel, boolean hardLod, boolean enableLight, int resPercent) {
                       StringBuilder cmd = new StringBuilder();
 
-                      // 1. Tutup paksa Free Fire terlebih dahulu agar perubahan langsung terbaca saat dibuka ulang
+                      // Hentikan Free Fire agar tekstur & resolusi dimuat ulang dari awal
                       cmd.append("am force-stop com.dts.freefireth\n");
                       cmd.append("am force-stop com.dts.freefiremax\n");
-
-                      // 2. Bersihkan cache shader & tekstur lama Free Fire
-                      cmd.append("rm -rf /sdcard/Android/data/com.dts.freefireth/cache/*\n");
-                      cmd.append("rm -rf /sdcard/Android/data/com.dts.freefiremax/cache/*\n");
-                      cmd.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefireth/cache/*\n");
-                      cmd.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefiremax/cache/*\n");
 
                       if (!enableTex && !enableLight) {
                           cmd.append("device_config delete game_overlay com.dts.freefireth\n");
@@ -291,73 +262,57 @@ jobs:
                           cmd.append("settings delete global angle_gl_driver_selection_pkgs\n");
                           cmd.append("settings delete global angle_gl_driver_selection_values\n");
                           cmd.append("settings delete global enable_gpu_debug_layers\n");
-                      } else {
-                          // Hitung faktor skala internal Free Fire (Tanpa mengubah ukuran layar HP)
-                          double scale = 1.0;
-                          if (enableLight) {
-                              scale = resPercent / 100.0; // 0.50 s/d 0.90 sesuai slider Mode Ringan
-                          }
-                          if (enableTex) {
-                              // Level Tekstur: 1=Asli, 2=Ringan, 3=Retro, 4=Kotak, 5=Ekstrem
-                              double texScale = 1.0 - ((texLevel - 1) * 0.14); // 1.0, 0.86, 0.72, 0.58, 0.44
-                              if (texScale < scale) scale = texScale;
-
-                              // Piksel Tajam (Nearest Filtering) vs Halus + Batas Jarak Tegas (LOD)
-                              if (sharpPixel) {
-                                  cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
-                                  cmd.append("settings put global angle_gl_driver_selection_values angle,angle\n");
-                                  cmd.append("setprop debug.hwui.renderer skiagl\n");
-                              } else {
-                                  cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
-                                  cmd.append("settings put global angle_gl_driver_selection_values native,native\n");
-                                  cmd.append("setprop debug.hwui.renderer opengl\n");
-                              }
-
-                              if (hardLod) {
-                                  cmd.append("settings put global enable_gpu_debug_layers 1\n");
-                                  cmd.append("settings put global gpu_debug_app com.dts.freefireth\n");
-                                  cmd.append("settings put global updatable_driver_production_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
-                              } else {
-                                  cmd.append("settings put global enable_gpu_debug_layers 0\n");
-                              }
-                          }
-
-                          String factorStr = String.format(Locale.US, "%.2f", Math.max(0.35, Math.min(1.0, scale)));
-                          String useAngle = sharpPixel ? ",useAngle=true" : "";
-
-                          cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=")
-                             .append(factorStr).append(",fps=120,loadingBoost=99999999").append(useAngle)
-                             .append(":mode=3,downscaleFactor=").append(factorStr).append(",fps=120").append(useAngle).append("\n");
-
-                          cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=")
-                             .append(factorStr).append(",fps=120,loadingBoost=99999999").append(useAngle)
-                             .append(":mode=3,downscaleFactor=").append(factorStr).append(",fps=120").append(useAngle).append("\n");
-
-                          cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefireth\n");
-                          cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefiremax\n");
+                          runShizukuAsync(cmd.toString(), "Grafik Free Fire Direset ke Asli");
+                          return;
                       }
 
-                      String res = execShizukuShell(cmd.toString());
-                      runOnUiThread(() -> {
-                          if (res.equals("OK")) {
-                              String summary = "Tekstur Lv." + texLevel + " & Resolusi " + resPercent + "% Aktif";
-                              startKeepAlive(summary);
-                              Toast.makeText(MainActivity.this, "Berhasil Disimpan ke Free Fire! Silakan buka game.", Toast.LENGTH_LONG).show();
+                      double scale = 1.0;
+                      if (enableLight) {
+                          scale = resPercent / 100.0;
+                      }
+                      if (enableTex) {
+                          double texScale = 1.0 - ((texLevel - 1) * 0.14);
+                          if (texScale < scale) scale = texScale;
+
+                          if (sharpPixel) {
+                              cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
+                              cmd.append("settings put global angle_gl_driver_selection_values angle,angle\n");
                           } else {
-                              Toast.makeText(MainActivity.this, res, Toast.LENGTH_LONG).show();
+                              cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
+                              cmd.append("settings put global angle_gl_driver_selection_values native,native\n");
                           }
-                      });
-                      return res;
+
+                          if (hardLod) {
+                              cmd.append("settings put global updatable_driver_production_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
+                          } else {
+                              cmd.append("settings delete global updatable_driver_production_opt_in_apps\n");
+                          }
+                      }
+
+                      String factorStr = String.format(Locale.US, "%.2f", Math.max(0.35, Math.min(1.0, scale)));
+                      String useAngle = sharpPixel ? ",useAngle=true" : "";
+
+                      cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=")
+                         .append(factorStr).append(",fps=120,loadingBoost=99999999").append(useAngle)
+                         .append(":mode=3,downscaleFactor=").append(factorStr).append(",fps=120").append(useAngle).append("\n");
+
+                      cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=")
+                         .append(factorStr).append(",fps=120,loadingBoost=99999999").append(useAngle)
+                         .append(":mode=3,downscaleFactor=").append(factorStr).append(",fps=120").append(useAngle).append("\n");
+
+                      cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefireth\n");
+                      cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefiremax\n");
+
+                      runShizukuAsync(cmd.toString(), "Berhasil Disimpan! Silakan buka Free Fire.");
                   }
 
-                  // FITUR AIM & PERFORMA SISTEM FREE FIRE
                   @JavascriptInterface
-                  public String runAimModule(int id, String name, boolean on, int sensi) {
+                  public void runAimModule(int id, String name, boolean on, int sensi) {
                       StringBuilder cmd = new StringBuilder();
                       if (id == 1) { // Aim Merah (Drag HS)
                           if (on) {
-                              cmd.append("cmd package compile -m speed -f com.dts.freefireth\n");
-                              cmd.append("cmd package compile -m speed -f com.dts.freefiremax\n");
+                              cmd.append("cmd game mode performance com.dts.freefireth\n");
+                              cmd.append("cmd game mode performance com.dts.freefiremax\n");
                               cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; done\n");
                           }
                       } else if (id == 2) { // Easy Drag
@@ -369,8 +324,8 @@ jobs:
                       } else if (id == 3) { // Smooth Aim
                           if (on) {
                               cmd.append("settings put global game_driver_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
-                              cmd.append("cmd game mode performance com.dts.freefireth\n");
-                              cmd.append("cmd game mode performance com.dts.freefiremax\n");
+                              cmd.append("am set-standby-bucket com.dts.freefireth active\n");
+                              cmd.append("am set-standby-bucket com.dts.freefiremax active\n");
                           } else {
                               cmd.append("settings delete global game_driver_opt_in_apps\n");
                           }
@@ -388,9 +343,7 @@ jobs:
                           }
                       }
 
-                      String res = execShizukuShell(cmd.toString());
-                      runOnUiThread(() -> Toast.makeText(MainActivity.this, res.equals("OK") ? (name + (on ? " Aktif" : " Nonaktif")) : res, Toast.LENGTH_SHORT).show());
-                      return res;
+                      runShizukuAsync(cmd.toString(), name + (on ? " Aktif" : " Nonaktif"));
                   }
 
                   @JavascriptInterface
@@ -408,7 +361,10 @@ jobs:
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
                               new android.os.Handler().postDelayed(() -> {
-                                  execShizukuShell("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done\n");
+                                  runShizukuAsync(
+                                      "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done",
+                                      "Sistem DANZSTRAIGHT Terhubung ke In-Game Free Fire"
+                                  );
                               }, 3500);
                           } else {
                               Toast.makeText(MainActivity.this, "Silakan buka aplikasi Free Fire", Toast.LENGTH_LONG).show();
@@ -419,7 +375,6 @@ jobs:
           }
           EOF
 
-          # Antarmuka V9: Gabungan Studio Grafik (Persis Foto 1 & 2) + Modul Aim & Admin Key
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -442,7 +397,6 @@ jobs:
             body { background: var(--bg); color: var(--text); padding: 12px; padding-bottom: 82px; }
             .hidden { display: none !important; }
 
-            /* LOGIN GATE */
             .login-wrap { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
             .login-box { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
             .brand-title { font-size: 19px; font-weight: 800; letter-spacing: 0.5px; }
@@ -455,15 +409,12 @@ jobs:
             .btn-cyan { width: 100%; background: var(--cyan); color: #061824; border: none; border-radius: 12px; padding: 12px; font-size: 14px; font-weight: 800; box-shadow: 0 0 18px var(--cyan-glow); cursor: pointer; }
             .btn-dark { width: 100%; background: var(--card-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 12px; font-weight: 700; }
 
-            /* TOP SWITCHER TABS (TEKSTUR vs MODE RINGAN vs AIM) */
             .top-tabs { display: flex; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 5px; margin-bottom: 14px; }
             .tab-pill { flex: 1; text-align: center; padding: 9px 6px; border-radius: 12px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; transition: 0.15s; }
             .tab-pill.active { background: var(--cyan); color: #051622; box-shadow: 0 0 14px var(--cyan-glow); }
 
-            /* BEFORE / AFTER PREVIEW BOX (PERSIS FOTO 1 & 2) */
             .preview-card { position: relative; width: 100%; height: 195px; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 12px; background: #1a2418; }
             .prev-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
-            /* Simulasi Tekstur Bata & Rumput Sebelum vs Sesudah Kotak Minecraft */
             .tex-before {
               background:
                 linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.4) 100%),
@@ -491,7 +442,6 @@ jobs:
               image-rendering: pixelated;
             }
 
-            /* Preview Mode Ringan (Langit Kota & Jalan) */
             .res-before { background: linear-gradient(180deg, #0d1b2a 0%, #1b263b 60%, #2b3240 60%, #1e242d 100%); }
             .res-after {
               clip-path: polygon(50% 0, 100% 0, 100% 100%, 50% 100%);
@@ -511,18 +461,15 @@ jobs:
             .split-handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 34px; height: 34px; border-radius: 50%; background: #fff; color: #000; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,0.6); z-index: 7; }
             .split-range { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; z-index: 10; cursor: ew-resize; }
 
-            /* TARGET GAME BAR */
             .game-bar { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 11px 14px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
             .game-title { font-size: 14px; font-weight: 800; }
             .game-sub { font-size: 11px; color: var(--muted); }
 
-            /* PRESET CEPAT BUTTONS */
             .sec-label { font-size: 11px; color: var(--muted); letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 8px; font-weight: 700; }
             .preset-bar { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 4px; gap: 4px; margin-bottom: 16px; }
             .preset-btn { background: transparent; color: var(--text); border: none; padding: 9px 4px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
             .preset-btn.active { background: var(--cyan); color: #051622; box-shadow: 0 0 12px var(--cyan-glow); }
 
-            /* SLIDER DETAIL TEKSTUR & RESOLUSI */
             .slider-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
             .slider-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 14px; font-weight: 700; }
             .slider-val-txt { color: var(--cyan); font-weight: 800; }
@@ -531,14 +478,12 @@ jobs:
             .ticks-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-weight: 600; }
             .ticks-row span.active { color: var(--cyan); font-weight: 800; }
 
-            /* 2 KOTAK TOGGLE (PIKSEL TAJAM & BATAS JARAK TEGAS) */
             .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
             .opt-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; justify-content: space-between; }
             .opt-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
             .opt-title { font-size: 13px; font-weight: 800; }
             .opt-desc { font-size: 11px; color: var(--muted); line-height: 1.35; }
 
-            /* CYAN SWITCH */
             .sw { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
             .sw input { opacity: 0; width: 0; height: 0; }
             .sl { position: absolute; inset: 0; background: #293241; border-radius: 24px; transition: .2s; }
@@ -546,21 +491,18 @@ jobs:
             input:checked + .sl { background: var(--cyan); box-shadow: 0 0 10px var(--cyan-glow); }
             input:checked + .sl:before { transform: translateX(20px); background: #061824; }
 
-            /* CATATAN INFO */
             .notes-box { font-size: 11px; color: var(--muted); line-height: 1.6; margin-bottom: 14px; padding: 0 4px; }
 
-            /* TOMBOL BAWAH (RESET KE ASLI & SIMPAN) */
             .action-row { display: flex; gap: 10px; margin-bottom: 14px; }
             .btn-reset { flex: 1; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 13px; font-size: 13px; font-weight: 800; cursor: pointer; }
-            .btn-save { flex: 1.8; background: var(--cyan); color: #051622; border: none; border-radius: 14px; padding: 13px; font-size: 14px; font-weight: 900; box-shadow: 0 0 20px var(--cyan-glow); cursor: pointer; }
+            .btn-save { flex: 1.8; background: var(--cyan); color: #051622; border: none; border-radius: 14px; padding: 13px; font-size: 14px; font-weight: 900; box-shadow: 0 0 20px var(--cyan-glow); cursor: pointer; transition: 0.15s; }
+            .btn-save:active { transform: scale(0.98); }
 
-            /* AIM & ADMIN CARDS */
             .aim-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 13px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
             .key-item { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
             .sm-btn { background: var(--card-2); color: #fff; border: 1px solid var(--border); padding: 5px 8px; border-radius: 6px; font-size: 10px; margin-left: 4px; }
             .sm-btn.stop { background: #5a1818; border-color: var(--danger); }
 
-            /* BOTTOM NAV */
             .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 56px; background: var(--card); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; z-index: 90; }
             .nav-it { font-size: 12px; color: var(--muted); font-weight: 700; padding: 8px 12px; cursor: pointer; }
             .nav-it.active { color: var(--cyan); border-bottom: 2px solid var(--cyan); }
@@ -568,11 +510,10 @@ jobs:
           </head>
           <body>
 
-            <!-- GERBANG AWAL SHIZUKU & LISENSI 1 KEY 1 DEVICE -->
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZSTRAIGHT</div>
-                <div class="brand-sub">Graphic Studio & Shizuku System v9.0</div>
+                <div class="brand-sub">Graphic Studio & Shizuku System v9.1</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -594,16 +535,15 @@ jobs:
               </div>
             </div>
 
-            <!-- TOP TABS PERSIS FOTO 1 & 2 -->
             <div class="top-tabs">
               <div class="tab-pill active" id="tab-btn-tex" onclick="openSection('tex')">Tekstur</div>
               <div class="tab-pill" id="tab-btn-light" onclick="openSection('light')">Mode Ringan</div>
               <div class="tab-pill" id="tab-btn-aim" onclick="openSection('aim')">Aim & Sensi</div>
             </div>
 
-            <!-- ==================== BAGIAN 1: TEKSTUR (PERSIS FOTO 1) ==================== -->
+            <!-- TAB 1: TEKSTUR -->
             <div id="sec-tex">
-              <div class="preview-card" id="tex-preview-card">
+              <div class="preview-card">
                 <div class="prev-layer tex-before">
                   <div class="tex-ground-before"></div>
                 </div>
@@ -673,11 +613,11 @@ jobs:
 
               <div class="action-row">
                 <button class="btn-reset" onclick="resetGraphicStudio()">Reset ke Asli</button>
-                <button class="btn-save" onclick="saveGraphicStudio()">Simpan</button>
+                <button class="btn-save" id="btn-save-1" onclick="saveGraphicStudio()">Simpan</button>
               </div>
             </div>
 
-            <!-- ==================== BAGIAN 2: MODE RINGAN (PERSIS FOTO 2) ==================== -->
+            <!-- TAB 2: MODE RINGAN -->
             <div id="sec-light" class="hidden">
               <div class="preview-card">
                 <div class="prev-layer res-before">
@@ -721,16 +661,16 @@ jobs:
 
               <div class="action-row">
                 <button class="btn-reset" onclick="resetGraphicStudio()">Reset ke Bawaan</button>
-                <button class="btn-save" onclick="saveGraphicStudio()">Simpan</button>
+                <button class="btn-save" id="btn-save-2" onclick="saveGraphicStudio()">Simpan</button>
               </div>
             </div>
 
-            <!-- ==================== BAGIAN 3: AIM MERAH, EASY DRAG & ADMIN KEY ==================== -->
+            <!-- TAB 3: AIM & ADMIN KEY -->
             <div id="sec-aim" class="hidden">
               <div class="aim-card">
                 <div>
                   <div class="game-title">Aim Merah (Drag HS)</div>
-                  <div class="game-sub">Kompilasi cepat paket FF & prioritas thread input tertinggi</div>
+                  <div class="game-sub">Prioritas tertinggi thread input Free Fire</div>
                 </div>
                 <label class="sw"><input type="checkbox" id="sw-aim-1" onchange="trigAim(1,'Aim Merah')"><span class="sl"></span></label>
               </div>
@@ -767,7 +707,6 @@ jobs:
                 <input type="range" min="1" max="7" step="1" value="4" class="range-styled" id="sensi-slider" onchange="onSensiChange(this.value)">
               </div>
 
-              <!-- PANEL DEVELOPER KEY (MUNCUL SAAT LOGIN PAKAI DANZ-DEV-999) -->
               <div class="slider-card hidden" id="dev-panel">
                 <div class="slider-head">
                   <span style="color:var(--cyan)">Developer Key Manager</span>
@@ -819,7 +758,6 @@ jobs:
                 document.getElementById('nav-3').classList.toggle('active', sec === 'aim');
               }
 
-              // Geser Garis Pembanding SEBELUM / SESUDAH
               function moveSplit(type, val) {
                 const layer = document.getElementById(type === 'tex' ? 'tex-after-layer' : 'res-after-layer');
                 const line = document.getElementById(type === 'tex' ? 'tex-line' : 'res-line');
@@ -829,7 +767,6 @@ jobs:
                 handle.style.left = val + '%';
               }
 
-              // Pilih Preset Cepat (Halus, Retro, Kotak Total, Kustom)
               function selectPreset(p) {
                 ['halus','retro','kotak','kustom'].forEach(x => {
                   document.getElementById('pr-' + x).classList.toggle('active', x === p);
@@ -874,6 +811,8 @@ jobs:
               }
 
               function saveGraphicStudio() {
+                document.getElementById('btn-save-1').innerText = "Menyimpan...";
+                document.getElementById('btn-save-2').innerText = "Menyimpan...";
                 const enableTex = document.getElementById('sw-ff-tex').checked;
                 const texLvl = parseInt(document.getElementById('tex-slider').value);
                 const sharp = document.getElementById('sw-sharp').checked;
@@ -881,6 +820,11 @@ jobs:
                 const enableLight = document.getElementById('sw-ff-light').checked;
                 const resPct = parseInt(document.getElementById('res-slider').value);
                 AndroidBridge.applyGraphicStudio(enableTex, texLvl, sharp, lod, enableLight, resPct);
+              }
+
+              function onSaveComplete() {
+                document.getElementById('btn-save-1').innerText = "Simpan";
+                document.getElementById('btn-save-2').innerText = "Simpan";
               }
 
               function resetGraphicStudio() {
@@ -902,7 +846,6 @@ jobs:
                 AndroidBridge.runAimModule(5, 'Sensitivitas FF Lv.' + val, true, parseInt(val));
               }
 
-              // SISTEM LISENSI 1 KEY 1 DEVICE
               function getKeys() {
                 const r = localStorage.getItem('danz_v9_keys');
                 if (!r) {
@@ -971,7 +914,7 @@ jobs:
 
               function renderKeyList() {
                 document.getElementById('key-list').innerHTML = getKeys().map(x => `
-                  <div class="key-item">
+                  <div class="key-row key-item">
                     <div><b>${x.key}</b><div style="color:var(--muted)">HP: ${x.hwid || 'Free'} | ${x.status}</div></div>
                     <div>
                       <button class="sm-btn" onclick="AndroidBridge.copyText('${x.key}')">Salin</button>
@@ -988,8 +931,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V9 APK
+      - name: Upload DANZSTRAIGHT V9.1 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V9-GRAPHIC-STUDIO
+          name: DANZSTRAIGHT-V9-1-ANTIFREEZE
           path: clean_apk/app/build/outputs/apk/debug/*.apk
