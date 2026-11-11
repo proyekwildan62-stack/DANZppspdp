@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V6.1 Clean Edition
+name: Build DANZSTRAIGHT V8 Pure FF Package
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,13 +19,12 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build APK with Shizuku Binder & AndroidX Fix
+      - name: Build Pure Free Fire Package Injector APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
           mkdir -p clean_apk/app/src/main/assets
 
-          # WAJIB: Mengaktifkan AndroidX agar library Shizuku tidak error saat build
           cat << 'EOF' > clean_apk/gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
@@ -48,8 +47,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 61
-              versionName "6.1"
+              versionCode 80
+              versionName "8.0"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -65,7 +64,6 @@ jobs:
           cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
               <queries>
@@ -119,14 +117,14 @@ jobs:
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
                   Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
-                  String info = intent != null ? intent.getStringExtra("status") : "Shizuku In-Game Aktif";
+                  String info = intent != null ? intent.getStringExtra("status") : "Injeksi Paket Free Fire Aktif";
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      String cid = "danz_service";
-                      NotificationChannel ch = new NotificationChannel(cid, "DANZSTRAIGHT Engine", NotificationManager.IMPORTANCE_LOW);
+                      String cid = "danz_ff_pkg";
+                      NotificationChannel ch = new NotificationChannel(cid, "DANZSTRAIGHT FF Engine", NotificationManager.IMPORTANCE_LOW);
                       NotificationManager nm = getSystemService(NotificationManager.class);
                       if (nm != null) nm.createNotificationChannel(ch);
                       Notification n = new Notification.Builder(this, cid)
-                              .setContentTitle("DANZSTRAIGHT Aktif di In-Game")
+                              .setContentTitle("DANZSTRAIGHT - Sistem Free Fire")
                               .setContentText(info)
                               .setSmallIcon(android.R.drawable.ic_media_play)
                               .setOngoing(true)
@@ -141,18 +139,15 @@ jobs:
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
-          import android.app.ActivityManager;
           import android.content.ClipData;
           import android.content.ClipboardManager;
           import android.content.Context;
           import android.content.Intent;
-          import android.content.pm.ApplicationInfo;
           import android.content.pm.PackageManager;
           import android.graphics.Color;
           import android.os.Build;
           import android.os.Bundle;
           import android.provider.Settings;
-          import android.util.DisplayMetrics;
           import android.view.Window;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebSettings;
@@ -165,13 +160,12 @@ jobs:
 
           public class MainActivity extends Activity {
               private WebView webView;
-              private int baseDpi = 360;
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
                   runOnUiThread(() -> {
                       if (ok) {
-                          Toast.makeText(MainActivity.this, "Shizuku Terhubung", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(MainActivity.this, "Shizuku Terhubung ke Paket Free Fire", Toast.LENGTH_SHORT).show();
                           webView.evaluateJavascript("setShizukuStatus(true)", null);
                       } else {
                           Toast.makeText(MainActivity.this, "Izin Shizuku Ditolak", Toast.LENGTH_LONG).show();
@@ -185,9 +179,6 @@ jobs:
                   requestWindowFeature(Window.FEATURE_NO_TITLE);
                   getWindow().setStatusBarColor(Color.parseColor("#111214"));
                   getWindow().setNavigationBarColor(Color.parseColor("#111214"));
-
-                  DisplayMetrics dm = getResources().getDisplayMetrics();
-                  baseDpi = dm.densityDpi > 0 ? dm.densityDpi : 360;
 
                   Shizuku.addRequestPermissionResultListener(PERM_LISTENER);
 
@@ -213,7 +204,7 @@ jobs:
                       if (!Shizuku.pingBinder()) return "ERR: Shizuku belum berjalan";
                       if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
                           Shizuku.requestPermission(101);
-                          return "ERR: Klik Izinkan pada pop-up Shizuku";
+                          return "ERR: Izinkan pop-up Shizuku terlebih dahulu";
                       }
                       Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
                       m.setAccessible(true);
@@ -276,95 +267,101 @@ jobs:
                       });
                   }
 
+                  // MURNI MENEMBAK PAKET & PROSES FREE FIRE (TANPA PENGATURAN HP & TANPA DOWNSCALE)
                   @JavascriptInterface
                   public String runFeature(int id, String name, boolean on, int sensi, int lightMode) {
                       StringBuilder cmd = new StringBuilder();
 
-                      if (id == 1) { // Aim Merah (Drag HS)
+                      if (id == 1) { // Aim Merah (Drag HS) -> Kompilasi Native Speed & Prioritas Thread Input FF
                           if (on) {
-                              cmd.append("settings put system pointer_speed 7\n");
-                              cmd.append("settings put secure long_press_timeout 120\n");
-                              cmd.append("settings put system touch_blocking_period 0.0\n");
+                              cmd.append("cmd package compile -m speed -f com.dts.freefireth\n");
+                              cmd.append("cmd package compile -m speed -f com.dts.freefiremax\n");
+                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; done\n");
                           } else {
-                              cmd.append("settings put system pointer_speed 0\n");
-                              cmd.append("settings put secure long_press_timeout 400\n");
+                              cmd.append("cmd package compile -m speed-profile com.dts.freefireth\n");
+                              cmd.append("cmd package compile -m speed-profile com.dts.freefiremax\n");
                           }
-                      } else if (id == 2) { // Easy Drag
-                          int dragDpi = Math.max(200, baseDpi - 70);
+                      } else if (id == 2) { // Easy Drag -> Real-Time I/O & CPU Affinity Khusus Proses FF
                           if (on) {
-                              cmd.append("settings put system pointer_speed 7\n");
-                              cmd.append("settings put secure multi_press_timeout 100\n");
-                              cmd.append("settings put secure long_press_timeout 110\n");
-                              cmd.append("wm density ").append(dragDpi).append("\n");
+                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done\n");
+                              cmd.append("cmd activity send-trim-memory com.dts.freefireth RUNNING_LOW\n");
+                              cmd.append("cmd activity send-trim-memory com.dts.freefiremax RUNNING_LOW\n");
                           } else {
-                              cmd.append("settings put secure multi_press_timeout 300\n");
-                              cmd.append("wm density reset\n");
+                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do ionice -c 2 -n 4 -p $p; done\n");
                           }
-                      } else if (id == 3) { // Smooth Aim
+                      } else if (id == 3) { // Smooth Aim -> Hardware Game Driver & 120 FPS Khusus Paket FF (Tanpa Downscale)
                           if (on) {
-                              cmd.append("setprop debug.sf.latch_unsignaled 1\n");
-                              cmd.append("setprop debug.performance.tuning 1\n");
-                              cmd.append("settings put global window_animation_scale 0.0\n");
-                              cmd.append("settings put global transition_animation_scale 0.0\n");
-                              cmd.append("settings put global animator_duration_scale 0.0\n");
+                              cmd.append("settings put global game_driver_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
+                              cmd.append("settings put global game_driver_prerelease_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
+                              cmd.append("device_config put game_overlay com.dts.freefireth mode=2,fps=120:mode=3,fps=120\n");
+                              cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,fps=120:mode=3,fps=120\n");
+                              cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefireth\n");
+                              cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefiremax\n");
                           } else {
-                              cmd.append("setprop debug.sf.latch_unsignaled 0\n");
-                              cmd.append("settings put global window_animation_scale 1.0\n");
-                              cmd.append("settings put global transition_animation_scale 1.0\n");
-                              cmd.append("settings put global animator_duration_scale 1.0\n");
+                              cmd.append("settings delete global game_driver_opt_in_apps\n");
+                              cmd.append("settings delete global game_driver_prerelease_opt_in_apps\n");
+                              cmd.append("device_config delete game_overlay com.dts.freefireth\n");
+                              cmd.append("device_config delete game_overlay com.dts.freefiremax\n");
                           }
-                      } else if (id == 4) { // Aim Legit
+                      } else if (id == 4) { // Aim Legit -> Whitelist Daya & Izin Prioritas Penuh Paket FF
                           if (on) {
-                              cmd.append("settings put system pointer_speed 5\n");
-                              cmd.append("settings put secure tap_duration_threshold 0.0\n");
-                              cmd.append("settings put secure touch_exploration_enabled 0\n");
+                              cmd.append("cmd deviceidle whitelist +com.dts.freefireth\n");
+                              cmd.append("cmd deviceidle whitelist +com.dts.freefiremax\n");
+                              cmd.append("cmd appops set com.dts.freefireth RUN_IN_BACKGROUND allow\n");
+                              cmd.append("cmd appops set com.dts.freefiremax RUN_IN_BACKGROUND allow\n");
+                              cmd.append("cmd appops set com.dts.freefireth RUN_ANY_IN_BACKGROUND allow\n");
+                              cmd.append("cmd appops set com.dts.freefiremax RUN_ANY_IN_BACKGROUND allow\n");
                           } else {
-                              cmd.append("settings put system pointer_speed 0\n");
+                              cmd.append("cmd deviceidle whitelist -com.dts.freefireth\n");
+                              cmd.append("cmd deviceidle whitelist -com.dts.freefiremax\n");
                           }
-                      } else if (id == 5) { // Sensitivitas (Level 1 - 7)
-                          int targetDpi = Math.max(180, baseDpi - (sensi * 22));
+                      } else if (id == 5) { // Sensitivitas Sistem FF (Level 1 - 7 Langsung ke Thread Priority Proses FF)
+                          int niceVal = -(sensi * 2 + 4); // Level 1 (-6) s/d Level 7 (-18) khusus proses FF
                           if (on) {
-                              cmd.append("settings put system pointer_speed ").append(sensi).append("\n");
-                              cmd.append("wm density ").append(targetDpi).append("\n");
-                          } else {
-                              cmd.append("settings put system pointer_speed 0\n");
-                              cmd.append("wm density reset\n");
-                          }
-                      } else if (id == 6) { // Boost HP & Kunci FPS
-                          if (on) {
+                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n ").append(niceVal).append(" -p $p; done\n");
                               cmd.append("cmd game mode performance com.dts.freefireth\n");
                               cmd.append("cmd game mode performance com.dts.freefiremax\n");
-                              cmd.append("settings put system peak_refresh_rate 120.0\n");
-                              cmd.append("settings put system min_refresh_rate 120.0\n");
-                              cmd.append("pm trim-caches 999999999\n");
                           } else {
-                              cmd.append("settings put system min_refresh_rate 60.0\n");
+                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n 0 -p $p; done\n");
                           }
-                      } else if (id == 7) { // Grafik Ringan (2 Mode)
+                      } else if (id == 6) { // Boost Sistem FF -> Standby Bucket Active & Loading Boost Khusus FF
+                          if (on) {
+                              cmd.append("am set-standby-bucket com.dts.freefireth active\n");
+                              cmd.append("am set-standby-bucket com.dts.freefiremax active\n");
+                              cmd.append("cmd game mode performance com.dts.freefireth\n");
+                              cmd.append("cmd game mode performance com.dts.freefiremax\n");
+                              cmd.append("rm -rf /sdcard/Android/data/com.dts.freefireth/cache/*\n");
+                              cmd.append("rm -rf /sdcard/Android/data/com.dts.freefiremax/cache/*\n");
+                          } else {
+                              cmd.append("cmd game mode standard com.dts.freefireth\n");
+                              cmd.append("cmd game mode standard com.dts.freefiremax\n");
+                          }
+                      } else if (id == 7) { // GRAFIK RINGAN (Khusus Paket FF & Tanpa Downscale Sama Sekali)
                           if (on) {
                               if (lightMode == 1) {
-                                  cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=0.35:mode=3,downscaleFactor=0.35\n");
-                                  cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=0.35:mode=3,downscaleFactor=0.35\n");
-                                  cmd.append("cmd game set --mode 2 --downscale 0.35 com.dts.freefireth\n");
-                                  cmd.append("cmd game set --mode 2 --downscale 0.35 com.dts.freefiremax\n");
-                                  cmd.append("wm size 540x1200\n");
-                                  cmd.append("setprop debug.hwui.renderer skiagl\n");
+                                  // Mode 1: Super Ringan (Production Driver + Loading Boost FF Tanpa Downscale)
+                                  cmd.append("settings put global updatable_driver_production_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
+                                  cmd.append("device_config put game_overlay com.dts.freefireth mode=2,fps=120,loadingBoost=99999999:mode=3,fps=120,loadingBoost=99999999\n");
+                                  cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,fps=120,loadingBoost=99999999:mode=3,fps=120,loadingBoost=99999999\n");
+                                  cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefireth\n");
+                                  cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefiremax\n");
                               } else {
-                                  cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=0.5:mode=3,downscaleFactor=0.5\n");
-                                  cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=0.5:mode=3,downscaleFactor=0.5\n");
-                                  cmd.append("cmd game set --mode 2 --downscale 0.5 com.dts.freefireth\n");
-                                  cmd.append("cmd game set --mode 2 --downscale 0.5 com.dts.freefiremax\n");
-                                  cmd.append("wm size 640x1136\n");
-                                  cmd.append("wm density 180\n");
-                                  cmd.append("setprop debug.hwui.renderer opengl\n");
+                                  // Mode 2: Mode PC (ANGLE OpenGL Driver Murni Khusus Paket FF Tanpa Downscale)
+                                  cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
+                                  cmd.append("settings put global angle_gl_driver_selection_values angle,angle\n");
+                                  cmd.append("device_config put game_overlay com.dts.freefireth mode=2,useAngle=true,fps=120,loadingBoost=99999999:mode=3,useAngle=true,fps=120\n");
+                                  cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,useAngle=true,fps=120,loadingBoost=99999999:mode=3,useAngle=true,fps=120\n");
+                                  cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefireth\n");
+                                  cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefiremax\n");
                               }
                           } else {
+                              cmd.append("settings delete global updatable_driver_production_opt_in_apps\n");
+                              cmd.append("settings delete global angle_gl_driver_selection_pkgs\n");
+                              cmd.append("settings delete global angle_gl_driver_selection_values\n");
                               cmd.append("device_config delete game_overlay com.dts.freefireth\n");
                               cmd.append("device_config delete game_overlay com.dts.freefiremax\n");
                               cmd.append("cmd game reset com.dts.freefireth\n");
                               cmd.append("cmd game reset com.dts.freefiremax\n");
-                              cmd.append("wm size reset\n");
-                              cmd.append("wm density reset\n");
                           }
                       }
 
@@ -372,27 +369,19 @@ jobs:
 
                       runOnUiThread(() -> {
                           if (res.equals("OK")) {
-                              startKeepAlive(name + " Aktif");
-                              if (id == 6 && on) {
-                                  ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-                                  for (ApplicationInfo app : getPackageManager().getInstalledApplications(0)) {
-                                      if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0 && !app.packageName.equals(getPackageName())) {
-                                          am.killBackgroundProcesses(app.packageName);
-                                      }
-                                  }
-                              }
-                              Toast.makeText(MainActivity.this, name + (on ? " Diaktifkan" : " Dinonaktifkan"), Toast.LENGTH_SHORT).show();
+                              startKeepAlive(name + " -> com.dts.freefireth");
+                              Toast.makeText(MainActivity.this, name + (on ? " Masuk ke Sistem FF" : " Direset dari FF"), Toast.LENGTH_SHORT).show();
                           } else {
                               Toast.makeText(MainActivity.this, res, Toast.LENGTH_LONG).show();
                           }
                       });
-                      return res.equals("OK") ? (name + (on ? " : Aktif" : " : Nonaktif")) : res;
+                      return res.equals("OK") ? (name + (on ? " : Terinjeksi ke Paket FF" : " : Nonaktif")) : res;
                   }
 
                   @JavascriptInterface
                   public void resetAll() {
-                      execShizukuShell("wm size reset\nwm density reset\ndevice_config delete game_overlay com.dts.freefireth\ndevice_config delete game_overlay com.dts.freefiremax\ncmd game reset com.dts.freefireth\ncmd game reset com.dts.freefiremax\nsettings put system pointer_speed 0\nsettings put global window_animation_scale 1.0\nsettings put global transition_animation_scale 1.0\nsettings put global animator_duration_scale 1.0\n");
-                      runOnUiThread(() -> Toast.makeText(MainActivity.this, "Semua Pengaturan & Layar Dikembalikan Normal", Toast.LENGTH_LONG).show());
+                      execShizukuShell("device_config delete game_overlay com.dts.freefireth\ndevice_config delete game_overlay com.dts.freefiremax\ncmd game reset com.dts.freefireth\ncmd game reset com.dts.freefiremax\nsettings delete global angle_gl_driver_selection_pkgs\nsettings delete global angle_gl_driver_selection_values\nsettings delete global game_driver_opt_in_apps\nsettings delete global updatable_driver_production_opt_in_apps\n");
+                      runOnUiThread(() -> Toast.makeText(MainActivity.this, "Semua Konfigurasi Paket Free Fire Direset", Toast.LENGTH_LONG).show());
                   }
 
                   @JavascriptInterface
@@ -403,15 +392,18 @@ jobs:
                   @JavascriptInterface
                   public void launchFreeFire() {
                       runOnUiThread(() -> {
-                          startKeepAlive("Injeksi In-Game Berjalan");
+                          startKeepAlive("Injeksi Paket Free Fire Berjalan");
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
                           if (i != null) {
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
+                              new android.os.Handler().postDelayed(() -> {
+                                  execShizukuShell("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done\n");
+                              }, 3500);
                           } else {
-                              Toast.makeText(MainActivity.this, "Pengaturan Aktif. Silakan buka Free Fire.", Toast.LENGTH_LONG).show();
+                              Toast.makeText(MainActivity.this, "Konfigurasi FF Aktif. Silakan buka Free Fire.", Toast.LENGTH_LONG).show();
                           }
                       });
                   }
@@ -497,7 +489,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-card">
                 <div class="app-name">DANZSTRAIGHT</div>
-                <div class="app-ver">System Tweaker & Shizuku Injector v6.1</div>
+                <div class="app-ver">Pure Free Fire Package Injector v8.0</div>
 
                 <div class="section-box">
                   <div class="row-between">
@@ -522,19 +514,19 @@ jobs:
             <div class="top-bar">
               <div>
                 <div class="app-name">DANZSTRAIGHT</div>
-                <div style="font-size:11px;color:var(--muted)">Shizuku In-Game Configuration</div>
+                <div style="font-size:11px;color:var(--muted)">Target Murni: com.dts.freefireth / max (Tanpa Downscale)</div>
               </div>
-              <button class="btn-small" onclick="AndroidBridge.resetAll()">Reset Normal</button>
+              <button class="btn-small" onclick="AndroidBridge.resetAll()">Reset FF</button>
             </div>
 
             <div class="info-grid">
               <div class="info-item">
-                <div class="info-label">Status Engine</div>
-                <div class="info-val">Shizuku Terhubung</div>
+                <div class="info-label">Target Injeksi</div>
+                <div class="info-val">Khusus Paket FF</div>
               </div>
               <div class="info-item">
-                <div class="info-label">Mode Performa</div>
-                <div class="info-val" id="perf-label">Siap Digunakan</div>
+                <div class="info-label">Sistem HP & Resolusi</div>
+                <div class="info-val">100% Tidak Diubah</div>
               </div>
             </div>
 
@@ -556,9 +548,9 @@ jobs:
                 <div class="module-top">
                   <div>
                     <div class="module-title">Aim Merah (Drag HS)</div>
-                    <div class="module-desc">Kecepatan pointer maksimum (+7) & penghapus jeda tekan tombol tembak</div>
+                    <div class="module-desc">Kompilasi native speed biner Free Fire & kunci prioritas thread input FF</div>
                   </div>
-                  <label class="switch"><input type="checkbox" id="sw-1" onchange="toggleMod(1,'Aim Merah')"><span class="slider"></span></label>
+                  <label class="switch"><input type="checkbox" id="sw-1" onchange="toggleMod(1,'Aim Merah FF')"><span class="slider"></span></label>
                 </div>
               </div>
 
@@ -566,9 +558,9 @@ jobs:
                 <div class="module-top">
                   <div>
                     <div class="module-title">Easy Drag</div>
-                    <div class="module-desc">Percepat respons multi-sentuhan (100ms) & peringan tarikan vertikal</div>
+                    <div class="module-desc">I/O Real-Time & ikat semua core CPU khusus pada proses Free Fire</div>
                   </div>
-                  <label class="switch"><input type="checkbox" id="sw-2" onchange="toggleMod(2,'Easy Drag')"><span class="slider"></span></label>
+                  <label class="switch"><input type="checkbox" id="sw-2" onchange="toggleMod(2,'Easy Drag FF')"><span class="slider"></span></label>
                 </div>
               </div>
 
@@ -576,9 +568,9 @@ jobs:
                 <div class="module-top">
                   <div>
                     <div class="module-title">Smooth Aim</div>
-                    <div class="module-desc">Kunci kestabilan frame layar & hilangkan patah-patah saat mengarahkan bidikan</div>
+                    <div class="module-desc">Aktifkan Game Driver perangkat keras & kunci 120 FPS khusus paket FF</div>
                   </div>
-                  <label class="switch"><input type="checkbox" id="sw-3" onchange="toggleMod(3,'Smooth Aim')"><span class="slider"></span></label>
+                  <label class="switch"><input type="checkbox" id="sw-3" onchange="toggleMod(3,'Smooth Aim FF')"><span class="slider"></span></label>
                 </div>
               </div>
 
@@ -586,22 +578,22 @@ jobs:
                 <div class="module-top">
                   <div>
                     <div class="module-title">Aim Legit</div>
-                    <div class="module-desc">Kalibrasi titik sentuh agar bidikan lurus dan tidak goyang di kepala</div>
+                    <div class="module-desc">Bebaskan paket Free Fire dari pembatasan daya & throttling proses</div>
                   </div>
-                  <label class="switch"><input type="checkbox" id="sw-4" onchange="toggleMod(4,'Aim Legit')"><span class="slider"></span></label>
+                  <label class="switch"><input type="checkbox" id="sw-4" onchange="toggleMod(4,'Aim Legit FF')"><span class="slider"></span></label>
                 </div>
               </div>
 
               <div class="module-card" id="card-5">
                 <div class="module-top">
                   <div>
-                    <div class="module-title">Sensitivitas Layar</div>
-                    <div class="module-desc">Atur kelicinan layar dan skala DPI otomatis (Level 1 - 7)</div>
+                    <div class="module-title">Sensitivitas Proses FF</div>
+                    <div class="module-desc">Atur tingkat prioritas respons thread internal Free Fire (Level 1 - 7)</div>
                   </div>
-                  <label class="switch"><input type="checkbox" id="sw-5" onchange="toggleMod(5,'Sensitivitas')"><span class="slider"></span></label>
+                  <label class="switch"><input type="checkbox" id="sw-5" onchange="toggleMod(5,'Sensitivitas FF')"><span class="slider"></span></label>
                 </div>
                 <div class="sub-control">
-                  <span style="font-size:12px;color:var(--muted)">Tingkat Kelicinan:</span>
+                  <span style="font-size:12px;color:var(--muted)">Level Prioritas Thread FF:</span>
                   <div class="step-box">
                     <button class="step-btn" onclick="changeSensi(-1)">-</button>
                     <b id="sensi-val" style="font-size:13px">4</b>
@@ -613,25 +605,25 @@ jobs:
               <div class="module-card" id="card-6">
                 <div class="module-top">
                   <div>
-                    <div class="module-title">Boost HP & Kunci FPS</div>
-                    <div class="module-desc">Hentikan aplikasi latar belakang, bersihkan cache & aktifkan Game Mode</div>
+                    <div class="module-title">Boost Sistem FF</div>
+                    <div class="module-desc">Kunci standby-bucket Free Fire ke Active & bersihkan cache internal FF</div>
                   </div>
-                  <label class="switch"><input type="checkbox" id="sw-6" onchange="toggleMod(6,'Boost Performa')"><span class="slider"></span></label>
+                  <label class="switch"><input type="checkbox" id="sw-6" onchange="toggleMod(6,'Boost Sistem FF')"><span class="slider"></span></label>
                 </div>
               </div>
 
               <div class="module-card" id="card-7">
                 <div class="module-top">
                   <div>
-                    <div class="module-title">Grafik Ringan</div>
-                    <div class="module-desc">Turunkan beban render tekstur in-game Free Fire via Shizuku</div>
+                    <div class="module-title">Grafik Ringan (Tanpa Downscale)</div>
+                    <div class="module-desc">Optimasi driver grafis khusus paket Free Fire tanpa menurunkan resolusi</div>
                   </div>
-                  <label class="switch"><input type="checkbox" id="sw-7" onchange="toggleMod(7,'Grafik Ringan')"><span class="slider"></span></label>
+                  <label class="switch"><input type="checkbox" id="sw-7" onchange="toggleMod(7,'Grafik Ringan FF')"><span class="slider"></span></label>
                 </div>
                 <div class="sub-control">
-                  <select class="select-box" id="light-mode" onchange="document.getElementById('sw-7').checked=true;toggleMod(7,'Grafik Ringan')">
-                    <option value="1">Mode 1: Super Ringan (Tekstur Polos / FPS Tinggi)</option>
-                    <option value="2">Mode 2: Burik PC (Resolusi Lebar Emulator)</option>
+                  <select class="select-box" id="light-mode" onchange="document.getElementById('sw-7').checked=true;toggleMod(7,'Grafik Ringan FF')">
+                    <option value="1">Mode 1: Super Ringan (Production Driver + Loading Boost FF)</option>
+                    <option value="2">Mode 2: Mode PC (ANGLE OpenGL Driver Khusus Paket FF)</option>
                   </select>
                 </div>
               </div>
@@ -643,7 +635,7 @@ jobs:
             <div class="bottom-bar">
               <div class="nav-btn active" onclick="window.scrollTo(0,0)">Menu Utama</div>
               <div class="nav-btn hidden" id="nav-dev" onclick="document.getElementById('dev-panel').classList.toggle('hidden')">Panel Key</div>
-              <div class="nav-btn" onclick="AndroidBridge.resetAll()">Reset Normal</div>
+              <div class="nav-btn" onclick="AndroidBridge.resetAll()">Reset FF</div>
               <div class="nav-btn" onclick="AndroidBridge.launchFreeFire()">Buka Game</div>
             </div>
 
@@ -665,17 +657,17 @@ jobs:
               }
 
               function getKeys() {
-                const raw = localStorage.getItem('danz_v6_keys');
+                const raw = localStorage.getItem('danz_v8_keys');
                 if (!raw) {
                   const def = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v6_keys', JSON.stringify(def));
+                  localStorage.setItem('danz_v8_keys', JSON.stringify(def));
                   return def;
                 }
                 return JSON.parse(raw);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v6_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v8_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -764,7 +756,7 @@ jobs:
                 sensi = Math.min(7, Math.max(1, sensi + d));
                 document.getElementById('sensi-val').innerText = sensi;
                 document.getElementById('sw-5').checked = true;
-                toggleMod(5, 'Sensitivitas Lv.' + sensi);
+                toggleMod(5, 'Sensitivitas FF Lv.' + sensi);
               }
 
               function toggleMod(id, name) {
@@ -775,7 +767,6 @@ jobs:
                   card.classList.add('active');
                   const res = AndroidBridge.runFeature(id, name, true, sensi, mode);
                   document.getElementById('status-log').innerText = "Status: " + res;
-                  document.getElementById('perf-label').innerText = "Injeksi Aktif";
                 } else {
                   card.classList.remove('active');
                   const res = AndroidBridge.runFeature(id, name, false, sensi, 0);
@@ -790,8 +781,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V6.1 APK
+      - name: Upload DANZSTRAIGHT V8 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V6-1-CLEAN
+          name: DANZSTRAIGHT-V8-PURE-FF
           path: clean_apk/app/build/outputs/apk/debug/*.apk
