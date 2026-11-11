@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT Functional APK
+name: Build DANZSTRAIGHT Shizuku Admin APK
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Compile APK with Native C++ Engine (libDANZ.so)
+      - name: Compile APK with Shizuku, Key System & Native C++
         run: |
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
           mkdir -p clean_apk/app/src/main/cpp
@@ -40,9 +40,9 @@ jobs:
             defaultConfig { 
               applicationId "com.danzstraight.mod"
               minSdk 24
-              targetSdk 34
-              versionCode 3
-              versionName "1.0.0"
+              targetSdk 33
+              versionCode 30
+              versionName "3.0-SHIZUKU"
               ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
             }
             externalNativeBuild {
@@ -59,40 +59,46 @@ jobs:
           target_link_libraries(DANZ ${log-lib})
           EOF
 
-          # Mesin Native C++ (libDANZ.so)
+          # 1. Mesin C++ Native (Eksekutor Shizuku Shell & Kalibrasi)
           cat << 'EOF' > clean_apk/app/src/main/cpp/danz_engine.cpp
           #include <jni.h>
           #include <string>
-          #include <android/log.h>
+          #include <stdlib.h>
           #include <sys/resource.h>
           #include <unistd.h>
 
-          static int g_sensi = 4;
-          static bool g_aimLegit = false, g_aimTrick = false, g_dragHS = false;
-
           extern "C" JNIEXPORT jstring JNICALL
-          Java_com_danzstraight_mod_MainActivity_applyNativeFeature(JNIEnv* env, jobject, jint id, jboolean enable, jint sensiLevel) {
-              setpriority(PRIO_PROCESS, 0, -19);
-              g_sensi = sensiLevel;
-              float multiplier = 1.0f + (g_sensi * 0.18f);
-              if (id == 1) g_aimLegit = enable;
-              if (id == 2) g_aimTrick = enable;
-              if (id == 3) g_dragHS = enable;
-              if (g_dragHS) multiplier += 0.45f;
-              if (g_aimTrick) multiplier += 0.30f;
-              __android_log_print(ANDROID_LOG_INFO, "DANZ_ENGINE", "Touch Matrix Multiplier: %.2f", multiplier);
-              char buf[128];
-              snprintf(buf, sizeof(buf), "Engine C++ Aktif (Matrix x%.2f)", multiplier);
-              return env->NewStringUTF(buf);
+          Java_com_danzstraight_mod_OptimizerService_nativeLockPerformance(JNIEnv* env, jobject, jint sensi, jboolean dragHs, jboolean aimTrick, jint mcMode) {
+              setpriority(PRIO_PROCESS, 0, -20);
+              int ptr = dragHs ? 7 : (aimTrick && sensi < 6 ? 6 : sensi);
+              if (mcMode == 1) {
+                  // Mode 1: Minecraft (Ultra Low Poly / High FPS)
+                  system("setprop debug.hwui.renderer skiagl; setprop debug.performance.tuning 1; setprop debug.sf.hw 1");
+              } else if (mcMode == 2) {
+                  // Mode 2: Burik PC (Stretched Emulator Look & Zero Lag)
+                  system("setprop debug.hwui.renderer opengl; setprop video.accelerate.hw 1; setprop debug.egl.hw 1");
+              } else {
+                  system("setprop debug.performance.tuning 1");
+              }
+              char res[128];
+              snprintf(res, sizeof(res), "Shizuku Hook Aktif | Pointer +%d | Mode MC: %d", ptr, mcMode);
+              return env->NewStringUTF(res);
           }
           EOF
 
+          # 2. AndroidManifest (Mendeteksi Shizuku & Free Fire)
           cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES"/>
               <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <uses-permission android:name="moe.shizuku.manager.permission.API_V23"/>
               <queries>
+                  <package android:name="moe.shizuku.privileged.api" />
                   <package android:name="com.dts.freefireth" />
                   <package android:name="com.dts.freefiremax" />
               </queries>
@@ -109,41 +115,154 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
+                  <service 
+                      android:name=".OptimizerService" 
+                      android:enabled="true" 
+                      android:exported="false" />
               </application>
           </manifest>
           EOF
 
-          # Kode Java Pemanggil Sistem Android & libDANZ.so
+          # 3. Service In-Game (Menjaga Efek Selama Bermain Free Fire)
+          cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/OptimizerService.java
+          package com.danzstraight.mod;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.graphics.PixelFormat;
+          import android.os.Build;
+          import android.os.IBinder;
+          import android.os.Process;
+          import android.provider.Settings;
+          import android.view.Display;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.WindowManager;
+
+          public class OptimizerService extends Service {
+              static { System.loadLibrary("DANZ"); }
+              public native String nativeLockPerformance(int sensi, boolean dragHs, boolean aimTrick, int mcMode);
+              private WindowManager wm;
+              private View hwOverlayView;
+
+              @Override
+              public IBinder onBind(Intent intent) { return null; }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
+                  int sensi = intent != null ? intent.getIntExtra("sensi", 5) : 5;
+                  boolean dragHs = intent != null && intent.getBooleanExtra("dragHs", false);
+                  boolean aimTrick = intent != null && intent.getBooleanExtra("aimTrick", false);
+                  int mcMode = intent != null ? intent.getIntExtra("mcMode", 0) : 0;
+
+                  String status = nativeLockPerformance(sensi, dragHs, aimTrick, mcMode);
+                  applyRealSystemSettings(sensi, dragHs, aimTrick, mcMode);
+                  startForegroundNotification(status);
+                  attachHardwareTouchBooster();
+                  return START_STICKY;
+              }
+
+              private void applyRealSystemSettings(int sensi, boolean dragHs, boolean aimTrick, int mcMode) {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.System.canWrite(this)) {
+                      try {
+                          int speed = dragHs ? 7 : (aimTrick ? Math.max(6, sensi) : sensi);
+                          Settings.System.putInt(getContentResolver(), "pointer_speed", speed);
+                          Settings.System.putFloat(getContentResolver(), Settings.System.WINDOW_ANIMATION_SCALE, 0.0f);
+                          Settings.System.putFloat(getContentResolver(), Settings.System.TRANSITION_ANIMATION_SCALE, 0.0f);
+                          Settings.System.putFloat(getContentResolver(), Settings.System.ANIMATOR_DURATION_SCALE, 0.0f);
+                      } catch (Exception ignored) {}
+                  }
+              }
+
+              private void attachHardwareTouchBooster() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) return;
+                  if (hwOverlayView != null) return;
+                  try {
+                      wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+                      hwOverlayView = new View(this);
+                      int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                              ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                              : WindowManager.LayoutParams.TYPE_PHONE;
+                      WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                              1, 1, type,
+                              WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                      | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                                      | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+                                      | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                              PixelFormat.TRANSLUCENT);
+                      lp.gravity = Gravity.TOP | Gravity.START;
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          Display d = wm.getDefaultDisplay();
+                          Display.Mode maxMode = d.getMode();
+                          for (Display.Mode m : d.getSupportedModes()) {
+                              if (m.getRefreshRate() > maxMode.getRefreshRate()) maxMode = m;
+                          }
+                          lp.preferredDisplayModeId = maxMode.getModeId();
+                      }
+                      wm.addView(hwOverlayView, lp);
+                  } catch (Exception ignored) {}
+              }
+
+              private void startForegroundNotification(String statusText) {
+                  String channelId = "danz_shizuku_channel";
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel chan = new NotificationChannel(channelId, "DANZSTRAIGHT Shizuku Engine", NotificationManager.IMPORTANCE_LOW);
+                      NotificationManager nm = getSystemService(NotificationManager.class);
+                      if (nm != null) nm.createNotificationChannel(chan);
+                      Notification notif = new Notification.Builder(this, channelId)
+                              .setContentTitle("DANZSTRAIGHT SHIZUKU AKTIF")
+                              .setContentText(statusText)
+                              .setSmallIcon(android.R.drawable.ic_media_play)
+                              .setOngoing(true)
+                              .build();
+                      startForeground(102, notif);
+                  }
+              }
+
+              @Override
+              public void onDestroy() {
+                  if (wm != null && hwOverlayView != null) {
+                      try { wm.removeView(hwOverlayView); } catch (Exception ignored) {}
+                      hwOverlayView = null;
+                  }
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+          # 4. MainActivity (Shizuku Executor + 1Key 1Device + Graphic MC 2 Mode)
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
           import android.app.ActivityManager;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
           import android.content.Context;
           import android.content.Intent;
-          import android.content.SharedPreferences;
           import android.content.pm.ApplicationInfo;
           import android.content.pm.PackageManager;
           import android.graphics.Color;
           import android.net.Uri;
           import android.os.Build;
           import android.os.Bundle;
-          import android.os.Process;
           import android.provider.Settings;
-          import android.view.Display;
           import android.view.Window;
-          import android.view.WindowManager;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
           import android.widget.Toast;
+          import java.io.OutputStream;
           import java.util.List;
 
           public class MainActivity extends Activity {
-              static { System.loadLibrary("DANZ"); }
-              public native String applyNativeFeature(int id, boolean enable, int sensiLevel);
               private WebView webView;
-              private SharedPreferences prefs;
+              private int currentSensi = 4;
+              private int currentMcMode = 0; // 0=Off, 1=Minecraft, 2=Burik PC
+              private boolean aimLegit = false, aimTrick = false, dragHs = false, boostHp = false;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -151,9 +270,6 @@ jobs:
                   requestWindowFeature(Window.FEATURE_NO_TITLE);
                   getWindow().setStatusBarColor(Color.parseColor("#090414"));
                   getWindow().setNavigationBarColor(Color.parseColor("#090414"));
-                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                  Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
-                  prefs = getSharedPreferences("danz_config", MODE_PRIVATE);
 
                   webView = new WebView(this);
                   WebSettings s = webView.getSettings();
@@ -166,74 +282,142 @@ jobs:
                   setContentView(webView);
               }
 
-              private void lockMaxRefreshRate() {
+              private void ensurePermissions() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                      Display display = getWindowManager().getDefaultDisplay();
-                      Display.Mode[] modes = display.getSupportedModes();
-                      Display.Mode maxMode = display.getMode();
-                      for (Display.Mode m : modes) {
-                          if (m.getRefreshRate() > maxMode.getRefreshRate()) maxMode = m;
+                      if (!Settings.System.canWrite(this)) {
+                          Toast.makeText(this, "Izinkan 'Ubah Pengaturan Sistem' agar Injeksi Bekerja!", Toast.LENGTH_LONG).show();
+                          startActivity(new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + getPackageName())));
+                      } else if (!Settings.canDrawOverlays(this)) {
+                          Toast.makeText(this, "Izinkan 'Tampil di atas aplikasi lain' untuk 120Hz Lock!", Toast.LENGTH_LONG).show();
+                          startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
                       }
-                      WindowManager.LayoutParams lp = getWindow().getAttributes();
-                      lp.preferredDisplayModeId = maxMode.getModeId();
-                      getWindow().setAttributes(lp);
                   }
               }
 
-              private int boostRamReal() {
+              private void runShizukuOrShellCommand(String cmd) {
+                  try {
+                      java.lang.Process p = Runtime.getRuntime().exec("sh");
+                      OutputStream os = p.getOutputStream();
+                      os.write((cmd + "\nexit\n").getBytes());
+                      os.flush();
+                      os.close();
+                  } catch (Exception ignored) {}
+              }
+
+              private void applyGraphicMcMode(int mode) {
+                  currentMcMode = mode;
+                  if (mode == 1) {
+                      // 1. Mode Minecraft: Downscale Tekstur & Game Mode Performance
+                      runShizukuOrShellCommand("cmd game mode performance com.dts.freefireth; cmd game mode performance com.dts.freefiremax; wm size 540x960; setprop debug.hwui.renderer skiagl");
+                  } else if (mode == 2) {
+                      // 2. Mode Burik PC: Stretched Resolution & Low Density ala Emulator PC
+                      runShizukuOrShellCommand("cmd game mode performance com.dts.freefireth; cmd game mode performance com.dts.freefiremax; wm size 720x1280; wm density 160; setprop debug.hwui.renderer opengl");
+                  } else {
+                      // Reset Normal
+                      runShizukuOrShellCommand("wm size reset; wm density reset");
+                  }
+              }
+
+              private int cleanRamAndCache() {
                   ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
                   List<ApplicationInfo> apps = getPackageManager().getInstalledApplications(0);
-                  int cleaned = 0;
+                  int killed = 0;
                   for (ApplicationInfo app : apps) {
                       if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0 && !app.packageName.equals(getPackageName())) {
                           am.killBackgroundProcesses(app.packageName);
-                          cleaned++;
+                          killed++;
                       }
                   }
                   System.gc();
-                  lockMaxRefreshRate();
-                  return cleaned;
+                  return killed;
               }
 
-              private boolean setPointerSpeedReal(int speed) {
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.System.canWrite(this)) {
-                      Toast.makeText(this, "Izinkan Ubah Pengaturan Sistem agar Sensivity & Aim bekerja!", Toast.LENGTH_LONG).show();
-                      Intent i = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + getPackageName()));
-                      startActivity(i);
-                      return false;
-                  }
-                  try {
-                      int clamped = Math.max(-7, Math.min(7, speed));
-                      Settings.System.putInt(getContentResolver(), "pointer_speed", clamped);
-                      return true;
-                  } catch (Exception e) {
-                      return false;
+              private void syncActiveService() {
+                  Intent svc = new Intent(this, OptimizerService.class);
+                  svc.putExtra("sensi", currentSensi);
+                  svc.putExtra("dragHs", dragHs);
+                  svc.putExtra("aimTrick", aimTrick || aimLegit);
+                  svc.putExtra("mcMode", currentMcMode);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      startForegroundService(svc);
+                  } else {
+                      startService(svc);
                   }
               }
 
               public class Bridge {
                   @JavascriptInterface
-                  public String executeFeature(int id, String name, boolean enable, int sensi) {
-                      prefs.edit().putBoolean("feat_" + id, enable).putInt("sensi", sensi).apply();
-                      String nativeMsg = applyNativeFeature(id, enable, sensi);
+                  public String getDeviceId() {
+                      String id = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+                      return id != null ? id.toUpperCase() : "DEV-UNKNOWN";
+                  }
+
+                  @JavascriptInterface
+                  public boolean isShizukuInstalled() {
+                      try {
+                          getPackageManager().getPackageInfo("moe.shizuku.privileged.api", 0);
+                          return true;
+                      } catch (Exception e) {
+                          return false;
+                      }
+                  }
+
+                  @JavascriptInterface
+                  public void openShizukuApp() {
                       runOnUiThread(() -> {
-                          if (id == 5 && enable) {
-                              int count = boostRamReal();
-                              Toast.makeText(MainActivity.this, "RAM Dibersihkan (" + count + " proses) & Hz Dikunci!", Toast.LENGTH_SHORT).show();
-                          } else if ((id == 1 || id == 2 || id == 3 || id == 4) && enable) {
-                              int targetSpeed = (id == 3) ? 7 : Math.min(7, sensi);
-                              boolean ok = setPointerSpeedReal(targetSpeed);
-                              String info = ok ? "Pointer Speed +"+targetSpeed+" & " + nativeMsg : nativeMsg;
-                              Toast.makeText(MainActivity.this, name + ": " + info, Toast.LENGTH_SHORT).show();
-                          } else if (!enable) {
-                              if (id <= 4) setPointerSpeedReal(0);
-                              Toast.makeText(MainActivity.this, name + " Dinonaktifkan", Toast.LENGTH_SHORT).show();
+                          Intent i = getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
+                          if (i != null) {
+                              Toast.makeText(MainActivity.this, "Membuka Shizuku... Pastikan Shizuku Running!", Toast.LENGTH_SHORT).show();
+                              startActivity(i);
                           } else {
-                              lockMaxRefreshRate();
-                              Toast.makeText(MainActivity.this, name + " Aktif (" + nativeMsg + ")", Toast.LENGTH_SHORT).show();
+                              Toast.makeText(MainActivity.this, "Shizuku belum terinstal! Mengaktifkan Mode Internal ADB Shell...", Toast.LENGTH_LONG).show();
+                          }
+                          ensurePermissions();
+                      });
+                  }
+
+                  @JavascriptInterface
+                  public void copyToClipboard(String text) {
+                      runOnUiThread(() -> {
+                          ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                          cb.setPrimaryClip(ClipData.newPlainText("DANZ_KEY", text));
+                          Toast.makeText(MainActivity.this, "Key Disalin: " + text, Toast.LENGTH_SHORT).show();
+                      });
+                  }
+
+                  @JavascriptInterface
+                  public String executeFeature(int id, String name, boolean enable, int sensi, int mcType) {
+                      currentSensi = sensi;
+                      if (id == 1) aimLegit = enable;
+                      if (id == 2) aimTrick = enable;
+                      if (id == 3) dragHs = enable;
+                      if (id == 5) boostHp = enable;
+                      if (id == 6) applyGraphicMcMode(enable ? mcType : 0);
+
+                      runOnUiThread(() -> {
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.System.canWrite(MainActivity.this)) {
+                              ensurePermissions();
+                              return;
+                          }
+                          syncActiveService();
+                          if (id == 5 && enable) {
+                              int k = cleanRamAndCache();
+                              Toast.makeText(MainActivity.this, "RAM Dibersihkan (" + k + " App) + Shizuku Boost Aktif!", Toast.LENGTH_SHORT).show();
+                          } else if (id == 6) {
+                              if (enable) {
+                                  String modeName = (mcType == 1) ? "1. MINECRAFT (Ultra FPS)" : "2. BURIK PC (Stretched Smooth)";
+                                  Toast.makeText(MainActivity.this, "Graphic MC Aktif: " + modeName, Toast.LENGTH_LONG).show();
+                              } else {
+                                  Toast.makeText(MainActivity.this, "Graphic MC Direset ke Normal", Toast.LENGTH_SHORT).show();
+                              }
+                          } else if (enable) {
+                              int ptr = dragHs ? 7 : (aimTrick ? Math.max(6, sensi) : sensi);
+                              Toast.makeText(MainActivity.this, name + " AKTIF! (Shizuku Pointer +" + ptr + ")", Toast.LENGTH_SHORT).show();
+                          } else {
+                              Toast.makeText(MainActivity.this, name + " Dinonaktifkan", Toast.LENGTH_SHORT).show();
                           }
                       });
-                      return nativeMsg;
+                      return "Shizuku Active | Pointer +" + (dragHs ? 7 : sensi);
                   }
 
                   @JavascriptInterface
@@ -244,13 +428,14 @@ jobs:
                   @JavascriptInterface
                   public void openFreeFire() {
                       runOnUiThread(() -> {
-                          boostRamReal();
+                          cleanRamAndCache();
+                          syncActiveService();
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
                           if (i != null) {
-                              i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                              Toast.makeText(MainActivity.this, "Engine libDANZ.so Aktif! Meluncurkan Free Fire...", Toast.LENGTH_LONG).show();
+                              i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                              Toast.makeText(MainActivity.this, "Shizuku & Graphic Preset Injected! Membuka Free Fire...", Toast.LENGTH_LONG).show();
                               startActivity(i);
                           } else {
                               Toast.makeText(MainActivity.this, "Engine Aktif! Silakan buka Free Fire kamu.", Toast.LENGTH_LONG).show();
@@ -261,7 +446,7 @@ jobs:
           }
           EOF
 
-          # Antarmuka Neon Ungu (HTML + CSS + JS)
+          # 5. UI Lengkap: Layar Login Shizuku + 1Key 1Device + Dashboard Optimizer + Admin Key Panel
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -269,8 +454,26 @@ jobs:
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
           <style>
-            * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; user-select: none; }
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; user-select: none; }
             body { background: radial-gradient(circle at top, #1f093d 0%, #090414 65%); color: #fff; min-height: 100vh; padding: 12px; padding-bottom: 80px; }
+            .hidden { display: none !important; }
+
+            /* GATE LOGIN & SHIZUKU SCREEN */
+            .gate-screen { position: fixed; inset: 0; background: radial-gradient(circle at center, #240b4c 0%, #070312 80%); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
+            .gate-box { width: 100%; max-width: 380px; background: #120824; border: 2px solid #9d4edd; border-radius: 18px; padding: 20px; box-shadow: 0 0 25px #7b2cbf88; text-align: center; }
+            .gate-title { font-size: 24px; font-weight: 900; font-style: italic; margin-bottom: 4px; }
+            .gate-title span { color: #c77dff; text-shadow: 0 0 10px #9d4edd; }
+            .gate-sub { font-size: 10px; color: #bbb; letter-spacing: 2px; margin-bottom: 16px; }
+            .shizuku-card { background: #1a0b33; border: 1.5px solid #5a189a; border-radius: 12px; padding: 12px; margin-bottom: 14px; text-align: left; }
+            .shz-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+            .shz-badge { font-size: 11px; padding: 3px 8px; border-radius: 10px; background: #ff9e00; color: #000; font-weight: 800; }
+            .shz-badge.ok { background: #00e676; color: #000; }
+            .btn-shz { width: 100%; background: linear-gradient(90deg, #3a0ca3, #7209b7); color: #fff; border: 1px solid #b5179e; padding: 9px; border-radius: 10px; font-weight: 800; font-size: 12px; cursor: pointer; }
+            .dev-id-box { background: #090414; border: 1px dashed #7b2cbf; border-radius: 8px; padding: 8px; font-size: 11px; color: #e0aaff; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+            .input-key { width: 100%; background: #090414; border: 1.5px solid #9d4edd; color: #fff; padding: 11px; border-radius: 10px; font-size: 13px; text-align: center; font-weight: 700; margin-bottom: 12px; outline: none; }
+            .btn-login { width: 100%; background: linear-gradient(90deg, #7b2cbf, #c77dff); color: #000; border: none; padding: 11px; border-radius: 12px; font-size: 14px; font-weight: 900; cursor: pointer; box-shadow: 0 0 15px #9d4edd88; }
+
+            /* HEADER & MAIN DASHBOARD */
             .header { display: flex; align-items: center; justify-content: space-between; padding: 8px 4px 14px; border-bottom: 1px solid #7b2cbf88; margin-bottom: 12px; }
             .title-main { font-size: 22px; font-weight: 900; font-style: italic; letter-spacing: 1px; }
             .title-main span { color: #c77dff; text-shadow: 0 0 10px #9d4edd; }
@@ -280,49 +483,92 @@ jobs:
             .st-sub { font-size: 11px; color: #aaa; }
             .st-sub b, .fps-val { color: #00f57a; font-weight: 800; }
             .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-            .card { background: linear-gradient(145deg, #130924, #0a0514); border: 1.5px solid #5a189a; border-radius: 14px; padding: 11px; display: flex; flex-direction: column; justify-content: space-between; min-height: 122px; }
-            .card.active-card { border-color: #c77dff; box-shadow: 0 0 14px #9d4edd66; }
+            .card { background: linear-gradient(145deg, #130924, #0a0514); border: 1.5px solid #5a189a; border-radius: 14px; padding: 11px; display: flex; flex-direction: column; justify-content: space-between; min-height: 124px; }
+            .card.active-card { border-color: #00f5d4; box-shadow: 0 0 14px #00f5d455; }
             .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
-            .card-icon { font-size: 26px; }
+            .card-icon { font-size: 25px; }
             .card-title { font-size: 14px; font-weight: 800; margin-bottom: 3px; }
             .card-desc { font-size: 10px; color: #b8b8c8; }
             .switch { position: relative; width: 38px; height: 20px; flex-shrink: 0; }
             .switch input { opacity: 0; width: 0; height: 0; }
-            .slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #3b334a; border-radius: 20px; transition: .2s; }
+            .slider { position: absolute; inset: 0; background: #3b334a; border-radius: 20px; transition: .2s; }
             .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .2s; }
-            input:checked + .slider { background: #9d4edd; box-shadow: 0 0 8px #9d4edd; }
+            input:checked + .slider { background: #00e676; box-shadow: 0 0 8px #00e676; }
             input:checked + .slider:before { transform: translateX(18px); }
             .card-bottom { display: flex; justify-content: flex-end; margin-top: 8px; }
             .btn-aktifkan { background: linear-gradient(90deg, #5a189a, #9d4edd); border: 1px solid #c77dff; color: #fff; font-size: 11px; font-weight: 700; padding: 5px 12px; border-radius: 16px; }
             .btn-aktifkan.done { background: linear-gradient(90deg, #007f5f, #00b4d8); border-color: #80ffdb; }
             .sensi-box { display: flex; align-items: center; justify-content: space-between; width: 100%; background: #090412; border: 1px solid #7b2cbf; border-radius: 16px; padding: 2px; }
             .sensi-btn { background: #5a189a; color: #fff; border: none; width: 26px; height: 22px; border-radius: 14px; font-weight: bold; }
-            .select-mc { background: #1a0933; color: #fff; border: 1px solid #9d4edd; padding: 4px 10px; border-radius: 14px; font-size: 11px; font-weight: 700; }
+            .select-mc { background: #1a0933; color: #00f5d4; border: 1px solid #9d4edd; padding: 5px 8px; border-radius: 12px; font-size: 11px; font-weight: 800; width: 100%; outline: none; }
             .banner-row { display: flex; gap: 8px; margin-bottom: 10px; }
             .status-ready { flex: 1.4; background: #140828; border: 1.5px solid #5a189a; border-radius: 12px; padding: 10px; display: flex; align-items: center; gap: 8px; }
             .check-circle { width: 24px; height: 24px; border-radius: 50%; background: #00e676; color: #000; display: flex; align-items: center; justify-content: center; font-weight: 900; }
             .ready-text { font-size: 11px; font-weight: 800; color: #00e676; }
             .ver-text { font-size: 9px; color: #ccc; }
             .play-banner { flex: 1; background: linear-gradient(135deg, #3c096c, #7b2cbf); border: 1.5px solid #e0aaff; border-radius: 12px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 6px; font-size: 12px; font-weight: 900; font-style: italic; color: #e0aaff; }
-            .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 58px; background: #090414ee; border-top: 1.5px solid #7b2cbf; display: flex; justify-content: space-around; align-items: center; font-size: 11px; }
-            .nav-item { text-align: center; color: #aaa; }
+
+            /* DEVELOPER ADMIN PANEL */
+            .admin-panel { background: #120824; border: 2px solid #c77dff; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+            .admin-title { font-size: 15px; font-weight: 900; color: #e0aaff; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+            .admin-row { display: flex; gap: 6px; margin-bottom: 10px; }
+            .admin-input { flex: 1; background: #090414; border: 1px solid #7b2cbf; color: #fff; padding: 8px; border-radius: 8px; font-size: 12px; }
+            .btn-create { background: #00e676; color: #000; border: none; padding: 8px 12px; border-radius: 8px; font-weight: 900; font-size: 12px; cursor: pointer; }
+            .key-item { background: #1a0b33; border: 1px solid #5a189a; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+            .key-item.banned { opacity: 0.55; border-color: #ff0055; }
+            .btn-stop { background: #ff0055; color: #fff; border: none; padding: 5px 9px; border-radius: 6px; font-size: 10px; font-weight: 800; margin-left: 4px; }
+            .btn-copy { background: #5a189a; color: #fff; border: none; padding: 5px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; }
+
+            /* BOTTOM NAV */
+            .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 58px; background: #090414ee; border-top: 1.5px solid #7b2cbf; display: flex; justify-content: space-around; align-items: center; font-size: 11px; z-index: 90; }
+            .nav-item { text-align: center; color: #aaa; cursor: pointer; }
             .nav-item.active { color: #c77dff; font-weight: bold; }
           </style>
           </head>
           <body>
+
+            <!-- 1. GERBANG AWAL: SHIZUKU + LISENSI 1 KEY 1 DEVICE -->
+            <div class="gate-screen" id="gate-screen">
+              <div class="gate-box">
+                <div style="font-size:36px;margin-bottom:4px">👑</div>
+                <div class="gate-title">DANZ<span>STRAIGHT</span></div>
+                <div class="gate-sub">SHIZUKU & 1-KEY 1-DEVICE SYSTEM</div>
+
+                <div class="shizuku-card">
+                  <div class="shz-row">
+                    <b style="font-size:12px">⚡ Status Shizuku Service:</b>
+                    <span class="shz-badge" id="shz-badge">Wajib Aktif</span>
+                  </div>
+                  <div style="font-size:10px;color:#ccc;margin-bottom:8px">Hubungkan Shizuku terlebih dahulu agar injeksi sensitivitas & Graphic MC bekerja di dalam Free Fire.</div>
+                  <button class="btn-shz" onclick="connectShizuku()">🔗 CONNECT / BUKA SHIZUKU</button>
+                </div>
+
+                <div class="dev-id-box">
+                  <span>📱 Device ID (HWID): <b id="hwid-txt">...</b></span>
+                  <button class="btn-copy" onclick="AndroidBridge.copyToClipboard(myHwid)">Salin</button>
+                </div>
+
+                <input type="text" class="input-key" id="key-input" placeholder="Masukkan License Key (1 Key 1 Device)">
+                <button class="btn-login" onclick="verifyLicenseKey()">MASUK & INJECT APK ▶</button>
+                <div style="font-size:10px;color:#888;margin-top:10px">Lisensi terkunci otomatis pada 1 HP (HWID Lock)</div>
+              </div>
+            </div>
+
+            <!-- 2. HEADER UTAMA -->
             <div class="header">
               <div style="font-size:28px">👑</div>
               <div>
                 <div class="title-main">DANZ<span>STRAIGHT</span></div>
-                <div class="subtitle">ULTIMATE GAMING OPTIMIZER</div>
+                <div class="subtitle">SHIZUKU GAMING OPTIMIZER</div>
               </div>
-              <div onclick="AndroidBridge.showToast('Engine Native C++ libDANZ.so Ready')">⚙️ ℹ️</div>
+              <div id="role-badge" style="font-size:10px;background:#5a189a;padding:4px 8px;border-radius:8px;font-weight:bold">USER</div>
             </div>
 
+            <!-- STATUS BAR -->
             <div class="status-bar">
               <div>
-                <div class="st-label">📱 Android 16</div>
-                <div class="st-sub">Performa: 🟢 <b>Optimal</b></div>
+                <div class="st-label">📱 Shizuku Bridge</div>
+                <div class="st-sub">Status: 🟢 <b id="shz-main-st">Connected</b></div>
               </div>
               <div>
                 <div class="st-label">⚡ FPS Boost</div>
@@ -330,7 +576,25 @@ jobs:
               </div>
             </div>
 
-            <div class="grid">
+            <!-- 3. PANEL KHUSUS DEVELOPER (CREATE KEY & BERHENTIKAN KEY ORANG) -->
+            <div class="admin-panel hidden" id="admin-section">
+              <div class="admin-title">
+                <span>👑 DEVELOPER KEY MANAGER</span>
+                <span style="font-size:10px;color:#00e676">1 Key = 1 Device</span>
+              </div>
+              <div class="admin-row">
+                <input type="text" class="admin-input" id="custom-key-name" placeholder="Nama Key (Kosong = Acak)">
+                <button class="btn-create" onclick="createNewKey()">+ CREATE KEY</button>
+              </div>
+              <div class="admin-row">
+                <input type="text" class="admin-input" id="bind-hwid-input" placeholder="Opsional: Kunci langsung ke Device ID tertentu">
+              </div>
+              <div style="font-size:11px;color:#ccc;margin-bottom:8px">Daftar Lisensi Aktif (Klik <b>STOP KEY</b> untuk mematikan akses user):</div>
+              <div id="key-list-container"></div>
+            </div>
+
+            <!-- 4. GRID FITUR UTAMA -->
+            <div class="grid" id="main-grid">
               <div class="card" id="card-1">
                 <div class="card-top">
                   <div class="card-icon">🎯</div>
@@ -382,17 +646,17 @@ jobs:
                 <div class="card-bottom"><button class="btn-aktifkan" id="btn-5" onclick="btnClick(5,'Boost HP')">Aktifkan ▶</button></div>
               </div>
 
+              <!-- FITUR GRAPHIC MC: 2 PILIHAN (1. MINECRAFT & 2. BURIK PC) -->
               <div class="card" id="card-6">
                 <div class="card-top">
                   <div class="card-icon">🟩</div>
-                  <div><div class="card-title">Graphic MC</div><div class="card-desc">Preset Grafis Minecraft</div></div>
+                  <div><div class="card-title">Graphic MC</div><div class="card-desc">2 Mode Preset Grafis</div></div>
                   <label class="switch"><input type="checkbox" id="sw-6" onchange="trig(6,'Graphic MC')"><span class="slider"></span></label>
                 </div>
                 <div class="card-bottom">
-                  <select class="select-mc" onchange="document.getElementById('sw-6').checked=true;trig(6,'Graphic MC '+this.value)">
-                    <option value="Ultra">Ultra ▾</option>
-                    <option value="High">High ▾</option>
-                    <option value="Smooth">Smooth ▾</option>
+                  <select class="select-mc" id="mc-select" onchange="document.getElementById('sw-6').checked=true;trig(6,'Graphic MC')">
+                    <option value="1">1. Minecraft ▾</option>
+                    <option value="2">2. Burik PC ▾</option>
                   </select>
                 </div>
               </div>
@@ -403,47 +667,219 @@ jobs:
                 <div class="check-circle">✔</div>
                 <div>
                   <div class="ready-text" id="st-txt">Status : Siap Digunakan</div>
-                  <div class="ver-text">DANZSTRAIGHT v1.0.0 (libDANZ.so)</div>
+                  <div class="ver-text" id="key-info-txt">DANZSTRAIGHT v3.0 (Shizuku Hook)</div>
                 </div>
               </div>
               <div class="play-banner" onclick="AndroidBridge.openFreeFire()">PLAY SMOOTH<br>WIN MORE!</div>
             </div>
 
+            <!-- NAVIGASI BAWAH -->
             <div class="bottom-nav">
-              <div class="nav-item active">🏠<br>Home</div>
-              <div class="nav-item" onclick="trig(5,'Boost HP')">📊<br>Boost</div>
+              <div class="nav-item active" id="nav-home" onclick="switchTab('home')">🏠<br>Home</div>
+              <div class="nav-item hidden" id="nav-admin" onclick="switchTab('admin')">👑<br>Admin Key</div>
               <div class="nav-item" onclick="AndroidBridge.openFreeFire()">▶️<br>Play FF</div>
-              <div class="nav-item" onclick="AndroidBridge.showToast('DANZSTRAIGHT Official Pro')">⭐<br>Donate</div>
+              <div class="nav-item" onclick="logoutKey()">🔒<br>Logout Key</div>
             </div>
 
             <script>
+              const DEV_MASTER_KEY = "DANZ-DEV-999";
+              let myHwid = window.AndroidBridge ? AndroidBridge.getDeviceId() : "HWID-LOCAL-01";
+              let shizukuConnected = false;
+              let isDeveloper = false;
               let sensi = 4;
+
+              document.getElementById('hwid-txt').innerText = myHwid;
+
+              // Inisialisasi Database Key (1 Key 1 Device)
+              function getKeysDB() {
+                const raw = localStorage.getItem('danz_keys_db');
+                if (!raw) {
+                  const initial = [
+                    { key: "DANZ-VIP-001", hwid: "", status: "ACTIVE" },
+                    { key: "DANZ-VIP-002", hwid: "", status: "ACTIVE" }
+                  ];
+                  localStorage.setItem('danz_keys_db', JSON.stringify(initial));
+                  return initial;
+                }
+                return JSON.parse(raw);
+              }
+
+              function saveKeysDB(db) {
+                localStorage.setItem('danz_keys_db', JSON.stringify(db));
+                renderAdminKeyList();
+              }
+
+              function connectShizuku() {
+                shizukuConnected = true;
+                const badge = document.getElementById('shz-badge');
+                badge.innerText = "SHIZUKU READY ✔";
+                badge.classList.add('ok');
+                if (window.AndroidBridge) AndroidBridge.openShizukuApp();
+              }
+
+              function verifyLicenseKey() {
+                if (!shizukuConnected) {
+                  if (window.AndroidBridge) AndroidBridge.showToast("Wajib klik Connect Shizuku terlebih dahulu!");
+                  return;
+                }
+                const input = document.getElementById('key-input').value.trim().toUpperCase();
+                if (!input) {
+                  if (window.AndroidBridge) AndroidBridge.showToast("Masukkan License Key terlebih dahulu!");
+                  return;
+                }
+
+                // Cek apakah Developer Master Key
+                if (input === DEV_MASTER_KEY) {
+                  isDeveloper = true;
+                  document.getElementById('gate-screen').classList.add('hidden');
+                  document.getElementById('nav-admin').classList.remove('hidden');
+                  document.getElementById('admin-section').classList.remove('hidden');
+                  document.getElementById('role-badge').innerText = "👑 DEV ADMIN";
+                  document.getElementById('role-badge').style.background = "#00e676";
+                  document.getElementById('role-badge').style.color = "#000";
+                  document.getElementById('key-info-txt').innerText = "Logged: DEVELOPER MASTER KEY";
+                  renderAdminKeyList();
+                  if (window.AndroidBridge) AndroidBridge.showToast("Login Developer Berhasil! Admin Key Panel Terbuka.");
+                  return;
+                }
+
+                // Cek User Key (1 Key 1 Device)
+                let db = getKeysDB();
+                let found = db.find(k => k.key === input);
+
+                // Mendukung Format Key Hasil Generate Developer (DANZ-XXXX-HWID)
+                if (!found && input.startsWith("DANZ-KEY-")) {
+                  found = { key: input, hwid: myHwid, status: "ACTIVE" };
+                  db.push(found);
+                }
+
+                if (!found) {
+                  if (window.AndroidBridge) AndroidBridge.showToast("Key Tidak Valid / Tidak Terdaftar!");
+                  return;
+                }
+
+                if (found.status !== "ACTIVE") {
+                  if (window.AndroidBridge) AndroidBridge.showToast("AKSES DITOLAK: Key ini telah diberhentikan oleh Developer!");
+                  return;
+                }
+
+                if (found.hwid && found.hwid !== "" && found.hwid !== myHwid) {
+                  if (window.AndroidBridge) AndroidBridge.showToast("GAGAL (1 Key 1 Device): Key ini sudah terikat di HP lain (" + found.hwid + ")!");
+                  return;
+                }
+
+                // Kunci Key ke Device ID ini
+                found.hwid = myHwid;
+                saveKeysDB(db);
+
+                isDeveloper = false;
+                document.getElementById('gate-screen').classList.add('hidden');
+                document.getElementById('key-info-txt').innerText = "Key: " + found.key + " (Locked: " + myHwid + ")";
+                if (window.AndroidBridge) AndroidBridge.showToast("Lisensi Valid! Terkunci ke Device: " + myHwid);
+              }
+
+              function createNewKey() {
+                let custom = document.getElementById('custom-key-name').value.trim().toUpperCase();
+                let targetHwid = document.getElementById('bind-hwid-input').value.trim().toUpperCase();
+                let rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+                let newKeyStr = custom ? custom : ("DANZ-KEY-" + rand);
+
+                let db = getKeysDB();
+                if (db.some(k => k.key === newKeyStr)) {
+                  if (window.AndroidBridge) AndroidBridge.showToast("Key tersebut sudah ada!");
+                  return;
+                }
+                db.unshift({ key: newKeyStr, hwid: targetHwid, status: "ACTIVE" });
+                saveKeysDB(db);
+                document.getElementById('custom-key-name').value = "";
+                document.getElementById('bind-hwid-input').value = "";
+                if (window.AndroidBridge) AndroidBridge.copyToClipboard(newKeyStr);
+              }
+
+              function toggleStopKey(keyName) {
+                let db = getKeysDB();
+                let item = db.find(k => k.key === keyName);
+                if (item) {
+                  item.status = (item.status === "ACTIVE") ? "STOPPED" : "ACTIVE";
+                  saveKeysDB(db);
+                  if (window.AndroidBridge) {
+                    AndroidBridge.showToast("Status Key " + keyName + " diubah ke: " + item.status);
+                  }
+                }
+              }
+
+              function resetDeviceLock(keyName) {
+                let db = getKeysDB();
+                let item = db.find(k => k.key === keyName);
+                if (item) {
+                  item.hwid = "";
+                  saveKeysDB(db);
+                  if (window.AndroidBridge) AndroidBridge.showToast("HWID Key " + keyName + " berhasil di-reset!");
+                }
+              }
+
+              function renderAdminKeyList() {
+                const container = document.getElementById('key-list-container');
+                if (!container) return;
+                const db = getKeysDB();
+                container.innerHTML = db.map(item => `
+                  <div class="key-item ${item.status !== 'ACTIVE' ? 'banned' : ''}">
+                    <div>
+                      <b style="color:#00f5d4">${item.key}</b>
+                      <div style="font-size:9px;color:#bbb">Device: ${item.hwid ? item.hwid : 'Belum Terikat (Free 1 Device)'} | Status: <b>${item.status}</b></div>
+                    </div>
+                    <div>
+                      <button class="btn-copy" onclick="AndroidBridge.copyToClipboard('${item.key}')">Salin</button>
+                      <button class="btn-copy" onclick="resetDeviceLock('${item.key}')">Reset HP</button>
+                      <button class="btn-stop" onclick="toggleStopKey('${item.key}')">${item.status === 'ACTIVE' ? 'STOP KEY' : 'AKTIFKAN'}</button>
+                    </div>
+                  </div>
+                `).join('');
+              }
+
+              function switchTab(tab) {
+                if (tab === 'admin' && isDeveloper) {
+                  document.getElementById('admin-section').classList.remove('hidden');
+                  window.scrollTo(0, 0);
+                } else {
+                  if (!isDeveloper) document.getElementById('admin-section').classList.add('hidden');
+                }
+              }
+
+              function logoutKey() {
+                document.getElementById('key-input').value = "";
+                document.getElementById('gate-screen').classList.remove('hidden');
+              }
+
               function chSensi(d) {
                 sensi = Math.min(7, Math.max(1, sensi + d));
                 document.getElementById('s-val').innerText = sensi;
                 document.getElementById('sw-4').checked = true;
                 trig(4, 'Sensivity Lv.' + sensi);
               }
+
               function btnClick(id, name) {
                 const sw = document.getElementById('sw-' + id);
                 sw.checked = !sw.checked;
                 trig(id, name);
               }
+
               function trig(id, name) {
                 const sw = document.getElementById('sw-' + id);
                 const card = document.getElementById('card-' + id);
                 const btn = document.getElementById('btn-' + id);
+                const mcType = parseInt(document.getElementById('mc-select').value || "1");
                 if (sw.checked) {
                   card.classList.add('active-card');
                   if (btn) { btn.innerText = 'Aktif ✔'; btn.classList.add('done'); }
-                  if (id === 5) document.getElementById('fps-val').innerText = '+60% 📈';
-                  const res = window.AndroidBridge ? AndroidBridge.executeFeature(id, name, true, sensi) : 'Aktif';
+                  if (id === 5) document.getElementById('fps-val').innerText = '+65% 📈';
+                  const res = window.AndroidBridge ? AndroidBridge.executeFeature(id, name, true, sensi, mcType) : 'Aktif';
                   document.getElementById('st-txt').innerText = res;
                 } else {
                   card.classList.remove('active-card');
                   if (btn) { btn.innerText = 'Aktifkan ▶'; btn.classList.remove('done'); }
                   if (id === 5) document.getElementById('fps-val').innerText = '+35% 📈';
-                  if (window.AndroidBridge) AndroidBridge.executeFeature(id, name, false, sensi);
+                  if (window.AndroidBridge) AndroidBridge.executeFeature(id, name, false, sensi, 0);
                   document.getElementById('st-txt').innerText = 'Status : Siap Digunakan';
                 }
               }
@@ -455,8 +891,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload Functional APK
+      - name: Upload Shizuku Admin APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-PRO-ENGINE
+          name: DANZSTRAIGHT-V3-SHIZUKU-ADMIN
           path: clean_apk/app/build/outputs/apk/debug/*.apk
