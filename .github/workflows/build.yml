@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V15 Anti-Crash & Blocky MC
+name: Build DANZSTRAIGHT V16 Pure Aim & Slippery Sensi
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,11 +19,10 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V15 APK
+      - name: Build DANZSTRAIGHT V16 APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
-          mkdir -p clean_apk/app/src/main/cpp
           mkdir -p clean_apk/app/src/main/assets
 
           cat << 'EOF' > clean_apk/gradle.properties
@@ -48,17 +47,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 150
-              versionName "15.0"
-              ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
-            }
-            packagingOptions {
-              jniLibs {
-                useLegacyPackaging = true
-              }
-            }
-            externalNativeBuild {
-              cmake { path "src/main/cpp/CMakeLists.txt" }
+              versionCode 160
+              versionName "16.0"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -71,346 +61,9 @@ jobs:
           }
           EOF
 
-          # 1. CMakeLists: Merakit 4 Preset Library OpenGL ES Layer
-          cat << 'EOF' > clean_apk/app/src/main/cpp/CMakeLists.txt
-          cmake_minimum_required(VERSION 3.18.1)
-          project("danz_mc")
-
-          add_library(mc_ringan SHARED danz_mc_layer.cpp)
-          target_compile_definitions(mc_ringan PRIVATE MC_DROP_MIP=3 MC_SHARP=0 MC_HARD_LOD=0)
-          target_link_libraries(mc_ringan GLESv2 GLESv3 log)
-
-          add_library(mc_retro SHARED danz_mc_layer.cpp)
-          target_compile_definitions(mc_retro PRIVATE MC_DROP_MIP=2 MC_SHARP=1 MC_HARD_LOD=0)
-          target_link_libraries(mc_retro GLESv2 GLESv3 log)
-
-          add_library(mc_kotak SHARED danz_mc_layer.cpp)
-          target_compile_definitions(mc_kotak PRIVATE MC_DROP_MIP=2 MC_SHARP=1 MC_HARD_LOD=1)
-          target_link_libraries(mc_kotak GLESv2 GLESv3 log)
-
-          add_library(mc_ekstrem SHARED danz_mc_layer.cpp)
-          target_compile_definitions(mc_ekstrem PRIVATE MC_DROP_MIP=1 MC_SHARP=1 MC_HARD_LOD=1)
-          target_link_libraries(mc_ekstrem GLESv2 GLESv3 log)
-          EOF
-
-          # 2. Mesin C++ OpenGL ES 3.0 Hook (Mengunci Mipmap 8x8 / 16x16 & GL_NEAREST agar Tekstur Kotak-Kotak)
-          cat << 'EOF' > clean_apk/app/src/main/cpp/danz_mc_layer.cpp
-          #include <GLES2/gl2.h>
-          #include <GLES3/gl3.h>
-          #include <string.h>
-          #include <stdint.h>
-
-          #ifndef MC_DROP_MIP
-          #define MC_DROP_MIP 2
-          #endif
-          #ifndef MC_SHARP
-          #define MC_SHARP 1
-          #endif
-          #ifndef MC_HARD_LOD
-          #define MC_HARD_LOD 1
-          #endif
-
-          #define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
-          #define MAX_TRACKED_TEX 65536
-
-          typedef void* (*PFNEGLGETNEXTLAYERPROCADDRESSPROC)(void*, const char*);
-          typedef void (*PFN_glActiveTexture)(GLenum);
-          typedef void (*PFN_glBindTexture)(GLenum, GLuint);
-          typedef void (*PFN_glBindSampler)(GLuint, GLuint);
-          typedef void (*PFN_glTexStorage2D)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
-          typedef void (*PFN_glCompressedTexImage2D)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void*);
-          typedef void (*PFN_glCompressedTexSubImage2D)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void*);
-          typedef void (*PFN_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*);
-          typedef void (*PFN_glTexSubImage2D)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void*);
-          typedef void (*PFN_glTexParameteri)(GLenum, GLenum, GLint);
-          typedef void (*PFN_glTexParameterf)(GLenum, GLenum, GLfloat);
-          typedef void (*PFN_glSamplerParameteri)(GLuint, GLenum, GLint);
-          typedef void (*PFN_glSamplerParameterf)(GLuint, GLenum, GLfloat);
-          typedef void (*PFN_glGenerateMipmap)(GLenum);
-
-          static PFN_glActiveTexture real_glActiveTexture = nullptr;
-          static PFN_glBindTexture real_glBindTexture = nullptr;
-          static PFN_glBindSampler real_glBindSampler = nullptr;
-          static PFN_glTexStorage2D real_glTexStorage2D = nullptr;
-          static PFN_glCompressedTexImage2D real_glCompressedTexImage2D = nullptr;
-          static PFN_glCompressedTexSubImage2D real_glCompressedTexSubImage2D = nullptr;
-          static PFN_glTexImage2D real_glTexImage2D = nullptr;
-          static PFN_glTexSubImage2D real_glTexSubImage2D = nullptr;
-          static PFN_glTexParameteri real_glTexParameteri = nullptr;
-          static PFN_glTexParameterf real_glTexParameterf = nullptr;
-          static PFN_glSamplerParameteri real_glSamplerParameteri = nullptr;
-          static PFN_glSamplerParameterf real_glSamplerParameterf = nullptr;
-          static PFN_glGenerateMipmap real_glGenerateMipmap = nullptr;
-
-          static uint8_t g_texMaxLevel[MAX_TRACKED_TEX] = {0};
-          static GLuint g_boundTex[32] = {0};
-          static uint32_t g_activeUnit = 0;
-
-          static inline GLuint currentTex() {
-              return g_boundTex[g_activeUnit & 31];
-          }
-
-          // Mengambil level mipmap 8x8 atau 16x16 (bukan 1x1) agar membentuk pola kotak-kotak Minecraft
-          static inline int calcBlockyLevel(int maxLvl) {
-              if (maxLvl <= 2) return 0;
-              int target = maxLvl - MC_DROP_MIP;
-              if (target < 2) target = 2;
-              return target;
-          }
-
-          static void lockBlockyTexture(int maxLvl) {
-              if (!real_glTexParameteri || !real_glTexParameterf || maxLvl <= 2) return;
-              int base = calcBlockyLevel(maxLvl);
-              GLint magFilter = MC_SHARP ? GL_NEAREST : GL_LINEAR;
-              GLint minFilter = MC_SHARP
-                  ? (MC_HARD_LOD ? GL_NEAREST_MIPMAP_NEAREST : GL_NEAREST_MIPMAP_LINEAR)
-                  : (MC_HARD_LOD ? GL_LINEAR_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR);
-
-              real_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, base);
-              real_glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, (GLfloat)base);
-              real_glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
-              real_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
-              real_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
-          }
-
-          static void hook_glActiveTexture(GLenum texture) {
-              if (texture >= GL_TEXTURE0 && texture < GL_TEXTURE0 + 32) {
-                  g_activeUnit = texture - GL_TEXTURE0;
-              }
-              if (real_glActiveTexture) real_glActiveTexture(texture);
-          }
-
-          static void hook_glBindTexture(GLenum target, GLuint texture) {
-              if (target == GL_TEXTURE_2D) {
-                  g_boundTex[g_activeUnit & 31] = texture;
-              }
-              if (real_glBindTexture) real_glBindTexture(target, texture);
-              if (target == GL_TEXTURE_2D && texture > 0 && texture < MAX_TRACKED_TEX) {
-                  uint8_t maxLvl = g_texMaxLevel[texture];
-                  if (maxLvl >= 3) {
-                      lockBlockyTexture((int)maxLvl);
-                  }
-              }
-          }
-
-          static void hook_glTexStorage2D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height) {
-              if (real_glTexStorage2D) real_glTexStorage2D(target, levels, internalformat, width, height);
-              if (target == GL_TEXTURE_2D && levels >= 4) {
-                  GLuint tex = currentTex();
-                  int maxLvl = (int)levels - 1;
-                  if (tex > 0 && tex < MAX_TRACKED_TEX) {
-                      g_texMaxLevel[tex] = (uint8_t)maxLvl;
-                  }
-                  lockBlockyTexture(maxLvl);
-              }
-          }
-
-          static void hook_glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void* data) {
-              if (real_glCompressedTexSubImage2D) {
-                  real_glCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, imageSize, data);
-              }
-              if (target == GL_TEXTURE_2D && level >= 3) {
-                  GLuint tex = currentTex();
-                  if (tex > 0 && tex < MAX_TRACKED_TEX && level > g_texMaxLevel[tex]) {
-                      g_texMaxLevel[tex] = (uint8_t)level;
-                  }
-                  lockBlockyTexture((int)level);
-              }
-          }
-
-          static void hook_glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void* pixels) {
-              if (real_glTexSubImage2D) {
-                  real_glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
-              }
-              if (target == GL_TEXTURE_2D && level >= 3) {
-                  GLuint tex = currentTex();
-                  if (tex > 0 && tex < MAX_TRACKED_TEX && level > g_texMaxLevel[tex]) {
-                      g_texMaxLevel[tex] = (uint8_t)level;
-                  }
-                  lockBlockyTexture((int)level);
-              }
-          }
-
-          static void hook_glCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void* data) {
-              if (real_glCompressedTexImage2D) {
-                  real_glCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, data);
-              }
-              if (target == GL_TEXTURE_2D && level >= 3) {
-                  GLuint tex = currentTex();
-                  if (tex > 0 && tex < MAX_TRACKED_TEX && level > g_texMaxLevel[tex]) {
-                      g_texMaxLevel[tex] = (uint8_t)level;
-                  }
-                  lockBlockyTexture((int)level);
-              }
-          }
-
-          static void hook_glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void* pixels) {
-              if (real_glTexImage2D) {
-                  real_glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
-              }
-              if (target == GL_TEXTURE_2D && level >= 3) {
-                  GLuint tex = currentTex();
-                  if (tex > 0 && tex < MAX_TRACKED_TEX && level > g_texMaxLevel[tex]) {
-                      g_texMaxLevel[tex] = (uint8_t)level;
-                  }
-                  lockBlockyTexture((int)level);
-              }
-          }
-
-          static void hook_glTexParameteri(GLenum target, GLenum pname, GLint param) {
-              if (!real_glTexParameteri) return;
-              if (target == GL_TEXTURE_2D) {
-                  GLuint tex = currentTex();
-                  uint8_t maxLvl = (tex > 0 && tex < MAX_TRACKED_TEX) ? g_texMaxLevel[tex] : 0;
-                  if (maxLvl >= 3) {
-                      if (pname == GL_TEXTURE_BASE_LEVEL) {
-                          param = calcBlockyLevel((int)maxLvl);
-                      } else if (pname == GL_TEXTURE_MAG_FILTER) {
-                          param = MC_SHARP ? GL_NEAREST : GL_LINEAR;
-                      } else if (pname == GL_TEXTURE_MIN_FILTER) {
-                          param = MC_SHARP
-                              ? (MC_HARD_LOD ? GL_NEAREST_MIPMAP_NEAREST : GL_NEAREST_MIPMAP_LINEAR)
-                              : (MC_HARD_LOD ? GL_LINEAR_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR);
-                      } else if (pname == GL_TEXTURE_MAX_ANISOTROPY_EXT) {
-                          param = 1;
-                      }
-                  }
-              }
-              real_glTexParameteri(target, pname, param);
-          }
-
-          static void hook_glTexParameterf(GLenum target, GLenum pname, GLfloat param) {
-              if (!real_glTexParameterf) return;
-              if (target == GL_TEXTURE_2D) {
-                  GLuint tex = currentTex();
-                  uint8_t maxLvl = (tex > 0 && tex < MAX_TRACKED_TEX) ? g_texMaxLevel[tex] : 0;
-                  if (maxLvl >= 3) {
-                      if (pname == GL_TEXTURE_MAX_ANISOTROPY_EXT) param = 1.0f;
-                      else if (pname == GL_TEXTURE_MIN_LOD) param = (GLfloat)calcBlockyLevel((int)maxLvl);
-                  }
-              }
-              real_glTexParameterf(target, pname, param);
-          }
-
-          static void hook_glBindSampler(GLuint unit, GLuint sampler) {
-              if (real_glBindSampler) real_glBindSampler(unit, sampler);
-              if (sampler > 0 && real_glSamplerParameteri && real_glSamplerParameterf) {
-                  GLuint tex = g_boundTex[unit & 31];
-                  uint8_t maxLvl = (tex > 0 && tex < MAX_TRACKED_TEX) ? g_texMaxLevel[tex] : 0;
-                  if (maxLvl >= 3) {
-                      int base = calcBlockyLevel((int)maxLvl);
-                      real_glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, MC_SHARP ? GL_NEAREST : GL_LINEAR);
-                      real_glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, MC_SHARP ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_NEAREST);
-                      real_glSamplerParameterf(sampler, GL_TEXTURE_MIN_LOD, (GLfloat)base);
-                      real_glSamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
-                  }
-              }
-          }
-
-          static void hook_glSamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
-              if (!real_glSamplerParameteri) return;
-              if (pname == GL_TEXTURE_MIN_FILTER && param >= 0x2700 && param <= 0x2703) {
-                  param = MC_SHARP
-                      ? (MC_HARD_LOD ? GL_NEAREST_MIPMAP_NEAREST : GL_NEAREST_MIPMAP_LINEAR)
-                      : (MC_HARD_LOD ? GL_LINEAR_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR);
-                  real_glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, MC_SHARP ? GL_NEAREST : GL_LINEAR);
-                  if (real_glSamplerParameterf) {
-                      real_glSamplerParameterf(sampler, GL_TEXTURE_MIN_LOD, 5.0f);
-                      real_glSamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
-                  }
-              } else if (pname == GL_TEXTURE_MAX_ANISOTROPY_EXT) {
-                  param = 1;
-              }
-              real_glSamplerParameteri(sampler, pname, param);
-          }
-
-          static void hook_glGenerateMipmap(GLenum target) {
-              if (real_glGenerateMipmap) real_glGenerateMipmap(target);
-              if (target == GL_TEXTURE_2D) {
-                  GLuint tex = currentTex();
-                  if (tex > 0 && tex < MAX_TRACKED_TEX && g_texMaxLevel[tex] < 7) {
-                      g_texMaxLevel[tex] = 7;
-                  }
-                  lockBlockyTexture(7);
-              }
-          }
-
-          extern "C" __attribute__((visibility("default")))
-          void AndroidGLESLayer_Initialize(void* layer_id, PFNEGLGETNEXTLAYERPROCADDRESSPROC get_next_proc) {
-              real_glActiveTexture = (PFN_glActiveTexture)get_next_proc(layer_id, "glActiveTexture");
-              real_glBindTexture = (PFN_glBindTexture)get_next_proc(layer_id, "glBindTexture");
-              real_glBindSampler = (PFN_glBindSampler)get_next_proc(layer_id, "glBindSampler");
-              real_glTexStorage2D = (PFN_glTexStorage2D)get_next_proc(layer_id, "glTexStorage2D");
-              real_glCompressedTexImage2D = (PFN_glCompressedTexImage2D)get_next_proc(layer_id, "glCompressedTexImage2D");
-              real_glCompressedTexSubImage2D = (PFN_glCompressedTexSubImage2D)get_next_proc(layer_id, "glCompressedTexSubImage2D");
-              real_glTexImage2D = (PFN_glTexImage2D)get_next_proc(layer_id, "glTexImage2D");
-              real_glTexSubImage2D = (PFN_glTexSubImage2D)get_next_proc(layer_id, "glTexSubImage2D");
-              real_glTexParameteri = (PFN_glTexParameteri)get_next_proc(layer_id, "glTexParameteri");
-              real_glTexParameterf = (PFN_glTexParameterf)get_next_proc(layer_id, "glTexParameterf");
-              real_glSamplerParameteri = (PFN_glSamplerParameteri)get_next_proc(layer_id, "glSamplerParameteri");
-              real_glSamplerParameterf = (PFN_glSamplerParameterf)get_next_proc(layer_id, "glSamplerParameterf");
-              real_glGenerateMipmap = (PFN_glGenerateMipmap)get_next_proc(layer_id, "glGenerateMipmap");
-          }
-
-          extern "C" __attribute__((visibility("default")))
-          void* AndroidGLESLayer_GetProcAddress(const char* name, void* next) {
-              if (!name) return next;
-              if (strcmp(name, "glActiveTexture") == 0) {
-                  if (!real_glActiveTexture) real_glActiveTexture = (PFN_glActiveTexture)next;
-                  return (void*)hook_glActiveTexture;
-              }
-              if (strcmp(name, "glBindTexture") == 0) {
-                  if (!real_glBindTexture) real_glBindTexture = (PFN_glBindTexture)next;
-                  return (void*)hook_glBindTexture;
-              }
-              if (strcmp(name, "glBindSampler") == 0) {
-                  if (!real_glBindSampler) real_glBindSampler = (PFN_glBindSampler)next;
-                  return (void*)hook_glBindSampler;
-              }
-              if (strcmp(name, "glTexStorage2D") == 0) {
-                  if (!real_glTexStorage2D) real_glTexStorage2D = (PFN_glTexStorage2D)next;
-                  return (void*)hook_glTexStorage2D;
-              }
-              if (strcmp(name, "glCompressedTexSubImage2D") == 0) {
-                  if (!real_glCompressedTexSubImage2D) real_glCompressedTexSubImage2D = (PFN_glCompressedTexSubImage2D)next;
-                  return (void*)hook_glCompressedTexSubImage2D;
-              }
-              if (strcmp(name, "glTexSubImage2D") == 0) {
-                  if (!real_glTexSubImage2D) real_glTexSubImage2D = (PFN_glTexSubImage2D)next;
-                  return (void*)hook_glTexSubImage2D;
-              }
-              if (strcmp(name, "glCompressedTexImage2D") == 0) {
-                  if (!real_glCompressedTexImage2D) real_glCompressedTexImage2D = (PFN_glCompressedTexImage2D)next;
-                  return (void*)hook_glCompressedTexImage2D;
-              }
-              if (strcmp(name, "glTexImage2D") == 0) {
-                  if (!real_glTexImage2D) real_glTexImage2D = (PFN_glTexImage2D)next;
-                  return (void*)hook_glTexImage2D;
-              }
-              if (strcmp(name, "glTexParameteri") == 0) {
-                  if (!real_glTexParameteri) real_glTexParameteri = (PFN_glTexParameteri)next;
-                  return (void*)hook_glTexParameteri;
-              }
-              if (strcmp(name, "glTexParameterf") == 0) {
-                  if (!real_glTexParameterf) real_glTexParameterf = (PFN_glTexParameterf)next;
-                  return (void*)hook_glTexParameterf;
-              }
-              if (strcmp(name, "glSamplerParameteri") == 0) {
-                  if (!real_glSamplerParameteri) real_glSamplerParameteri = (PFN_glSamplerParameteri)next;
-                  return (void*)hook_glSamplerParameteri;
-              }
-              if (strcmp(name, "glGenerateMipmap") == 0) {
-                  if (!real_glGenerateMipmap) real_glGenerateMipmap = (PFN_glGenerateMipmap)next;
-                  return (void*)hook_glGenerateMipmap;
-              }
-              return next;
-          }
-          EOF
-
           cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              android:forceQueryable="true">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <queries>
                   <package android:name="moe.shizuku.privileged.api" />
                   <package android:name="com.dts.freefireth" />
@@ -418,7 +71,6 @@ jobs:
               </queries>
               <application 
                   android:label="DANZSTRAIGHT" 
-                  android:extractNativeLibs="true"
                   android:hardwareAccelerated="true"
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
                   <activity 
@@ -441,7 +93,7 @@ jobs:
           </manifest>
           EOF
 
-          # 3. MainActivity V15: Bebas Force-Close (Tanpa ANGLE & Tanpa am compat di Watcher) + Symlink Layer Traverse
+          # MainActivity V16: Fokus Murni Aim Headshot & Pelicin Layar In-Game Free Fire (Tanpa Grafik MC)
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import android.app.Activity;
@@ -471,6 +123,12 @@ jobs:
               private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
               private final Handler mainHandler = new Handler(Looper.getMainLooper());
               private boolean autoWatcherRunning = false;
+
+              private boolean aimMerahOn = true;
+              private boolean easyDragOn = true;
+              private boolean smoothAimOn = true;
+              private boolean aimLegitOn = true;
+              private boolean sensiActive = true;
               private int currentSensi = 7;
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
@@ -479,6 +137,7 @@ jobs:
                       if (ok) {
                           Toast.makeText(MainActivity.this, "Shizuku Terhubung!", Toast.LENGTH_SHORT).show();
                           webView.evaluateJavascript("setShizukuStatus(true)", null);
+                          cleanLeftoverGraphicHooks();
                       } else {
                           Toast.makeText(MainActivity.this, "Izin Shizuku Ditolak", Toast.LENGTH_LONG).show();
                       }
@@ -489,8 +148,8 @@ jobs:
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   requestWindowFeature(Window.FEATURE_NO_TITLE);
-                  getWindow().setStatusBarColor(Color.parseColor("#0D1117"));
-                  getWindow().setNavigationBarColor(Color.parseColor("#0D1117"));
+                  getWindow().setStatusBarColor(Color.parseColor("#0B0E14"));
+                  getWindow().setNavigationBarColor(Color.parseColor("#0B0E14"));
 
                   Shizuku.addRequestPermissionResultListener(PERM_LISTENER);
 
@@ -498,7 +157,7 @@ jobs:
                   WebSettings s = webView.getSettings();
                   s.setJavaScriptEnabled(true);
                   s.setDomStorageEnabled(true);
-                  webView.setBackgroundColor(Color.parseColor("#0D1117"));
+                  webView.setBackgroundColor(Color.parseColor("#0B0E14"));
                   webView.setWebViewClient(new WebViewClient());
                   webView.addJavascriptInterface(new Bridge(), "AndroidBridge");
                   webView.loadUrl("file:///android_asset/index.html");
@@ -513,74 +172,136 @@ jobs:
                   super.onDestroy();
               }
 
-              private String getInstalledFFPackage() {
-                  PackageManager pm = getPackageManager();
-                  try {
-                      pm.getPackageInfo("com.dts.freefireth", 0);
-                      return "com.dts.freefireth";
-                  } catch (Exception ignored) {}
-                  try {
-                      pm.getPackageInfo("com.dts.freefiremax", 0);
-                      return "com.dts.freefiremax";
-                  } catch (Exception ignored) {}
-                  return "com.dts.freefireth";
+              // Membersihkan semua sisa pengaturan Grafik MC / Downscale / ANGLE dari versi lama agar FF tidak pernah mental
+              private void cleanLeftoverGraphicHooks() {
+                  StringBuilder clean = new StringBuilder();
+                  String[] compatFlags = {"DOWNSCALED","DOWNSCALE_90","DOWNSCALE_85","DOWNSCALE_80","DOWNSCALE_75","DOWNSCALE_70","DOWNSCALE_65","DOWNSCALE_60","DOWNSCALE_55","DOWNSCALE_50","DOWNSCALE_45","DOWNSCALE_40","DOWNSCALE_35","DOWNSCALE_30"};
+                  for (String f : compatFlags) {
+                      clean.append("am compat reset ").append(f).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                      clean.append("am compat reset ").append(f).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+                  }
+                  clean.append("device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n");
+                  clean.append("device_config delete game_overlay com.dts.freefiremax >/dev/null 2>&1\n");
+                  clean.append("cmd game reset com.dts.freefireth >/dev/null 2>&1\n");
+                  clean.append("cmd game reset com.dts.freefiremax >/dev/null 2>&1\n");
+                  clean.append("setprop debug.gles.layers \"\" >/dev/null 2>&1\n");
+                  clean.append("rm -f /data/local/tmp/m.so >/dev/null 2>&1\n");
+                  clean.append("am clear-debug-app >/dev/null 2>&1\n");
+                  clean.append("settings delete global enable_gpu_debug_layers >/dev/null 2>&1\n");
+                  clean.append("settings delete global gpu_debug_app >/dev/null 2>&1\n");
+                  clean.append("settings delete global gpu_debug_layer_app >/dev/null 2>&1\n");
+                  clean.append("settings delete global gpu_debug_layers_gles >/dev/null 2>&1\n");
+                  clean.append("settings delete global angle_gl_driver_selection_pkgs >/dev/null 2>&1\n");
+                  clean.append("settings delete global angle_gl_driver_selection_values >/dev/null 2>&1\n");
+                  clean.append("settings put global angle_gl_driver_all_angle 0 >/dev/null 2>&1\n");
+                  executeShizukuSilent(clean.toString());
               }
 
-              // PENTING: Watcher di V15 HANYA menjaga kelicinan sentuhan & prioritas CPU, TIDAK memanggil am compat agar Free Fire tidak pernah mental!
-              private void startInGameTouchWatcher() {
+              // Watcher Otomatis: Menjaga Aim & Kelicinan Layar tetap menempel di sistem Free Fire setiap 5 detik selama bermain
+              private void startInGameAimWatcher() {
                   if (autoWatcherRunning) return;
                   autoWatcherRunning = true;
                   Runnable watcher = new Runnable() {
                       @Override
                       public void run() {
                           if (!autoWatcherRunning) return;
-                          executeShizukuSilent(buildSafeSlipperyAimScript(currentSensi));
-                          mainHandler.postDelayed(this, 6000);
+                          executeShizukuSilent(buildFullFFSystemScript(false));
+                          mainHandler.postDelayed(this, 5000);
                       }
                   };
-                  mainHandler.postDelayed(watcher, 4000);
+                  mainHandler.postDelayed(watcher, 3000);
               }
 
-              // Script Sensitivitas Licin & Prioritas UnityMain (Tanpa ANGLE & Tanpa chrt yang bikin crash)
-              private String buildSafeSlipperyAimScript(int sensi) {
-                  int holdDelay = Math.max(60, 200 - (sensi * 20));
-                  int niceVal = -(sensi * 2 + 6);
+              // Rangkaian Injeksi Aim Headshot & Pelicin Layar Langsung ke Sistem & Thread Free Fire
+              private String buildFullFFSystemScript(boolean includeCompile) {
+                  StringBuilder cmd = new StringBuilder();
 
-                  return "settings delete global angle_gl_driver_selection_pkgs >/dev/null 2>&1\n" +
-                         "settings delete global angle_gl_driver_selection_values >/dev/null 2>&1\n" +
-                         "settings put global angle_gl_driver_all_angle 0 >/dev/null 2>&1\n" +
-                         "device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n" +
-                         "device_config put input_native_boot resample_touch 1 >/dev/null 2>&1\n" +
-                         "device_config put input_native_boot deep_press_enabled 0 >/dev/null 2>&1\n" +
-                         "device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n" +
-                         "settings put system pointer_speed 7 >/dev/null 2>&1\n" +
-                         "settings put secure touch_slop 0 >/dev/null 2>&1\n" +
-                         "settings put system touch_slop 0 >/dev/null 2>&1\n" +
-                         "settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n" +
-                         "settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n" +
-                         "settings put secure long_press_timeout " + holdDelay + " >/dev/null 2>&1\n" +
-                         "settings put secure multi_press_timeout " + holdDelay + " >/dev/null 2>&1\n" +
-                         "settings put system touch_game_mode 1 >/dev/null 2>&1\n" +
-                         "settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1\n" +
-                         "settings put system touch_sensitivity 1 >/dev/null 2>&1\n" +
-                         "settings put global game_space_touch_sensitivity 100 >/dev/null 2>&1\n" +
-                         "settings put global game_space_swipe_sensitivity 100 >/dev/null 2>&1\n" +
-                         "settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n" +
-                         "settings put system min_refresh_rate 120.0 >/dev/null 2>&1\n" +
-                         "settings put global tran_refresh_rate_mode 120 >/dev/null 2>&1\n" +
-                         "setprop windowsmgr.max_events_per_sec 300 >/dev/null 2>&1\n" +
-                         "setprop view.scroll_friction 0.001 >/dev/null 2>&1\n" +
-                         "setprop view.minimum_fling_velocity 1 >/dev/null 2>&1\n" +
-                         "setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1\n" +
-                         "setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1\n" +
-                         "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
-                         "  renice -n -20 -p $p >/dev/null 2>&1; " +
-                         "  ionice -c 1 -n 0 -p $p >/dev/null 2>&1; " +
-                         "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
-                         "    renice -n " + niceVal + " -p $t >/dev/null 2>&1; " +
-                         "    taskset -p ff $t >/dev/null 2>&1; " +
-                         "  done; " +
-                         "done\n";
+                  // 1. SENSITIVITAS PELICIN LAYAR IN-GAME (Level 1 - 7)
+                  if (sensiActive) {
+                      int holdMs = Math.max(55, 195 - (currentSensi * 20)); // Level 7 = 55ms
+                      int xarenaSensi = 30 + (currentSensi * 10); // Level 7 = 100 (Max Licin)
+                      int maxEvents = 180 + (currentSensi * 50); // Level 7 = 530 events/sec
+                      int flingMax = 12000 + (currentSensi * 3000); // Level 7 = 33000
+
+                      cmd.append("settings put system pointer_speed ").append(currentSensi).append(" >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot resample_touch 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure long_press_timeout ").append(holdMs).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put secure multi_press_timeout ").append(holdMs).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put global game_space_touch_sensitivity ").append(xarenaSensi).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put global game_space_swipe_sensitivity ").append(xarenaSensi).append(" >/dev/null 2>&1\n");
+                      cmd.append("settings put system touch_game_mode 1 >/dev/null 2>&1\n");
+                      cmd.append("settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1\n");
+                      cmd.append("settings put system touch_sensitivity 1 >/dev/null 2>&1\n");
+                      cmd.append("setprop windowsmgr.max_events_per_sec ").append(maxEvents).append(" >/dev/null 2>&1\n");
+                      cmd.append("setprop view.scroll_friction 0.0 >/dev/null 2>&1\n");
+                      cmd.append("setprop view.minimum_fling_velocity 1 >/dev/null 2>&1\n");
+                      cmd.append("setprop view.maximum_fling_velocity ").append(flingMax).append(" >/dev/null 2>&1\n");
+                  }
+
+                  // 2. AIM MERAH (DRAG HS) -> Impulse Velocity Tracker + Game Mode Performance FF
+                  if (aimMerahOn) {
+                      cmd.append("device_config put input_native_boot velocitytracker_strategy impulse >/dev/null 2>&1\n");
+                      cmd.append("settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode performance com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode performance com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n");
+                      if (includeCompile) {
+                          cmd.append("cmd package compile -m speed-profile -f com.dts.freefireth >/dev/null 2>&1 &\n");
+                          cmd.append("cmd package compile -m speed-profile -f com.dts.freefiremax >/dev/null 2>&1 &\n");
+                      }
+                  }
+
+                  // 3. EASY DRAG (PELICIN TARIKAN VERTIKAL) -> Zero Touch Slop & Palm Rejection Off
+                  if (easyDragOn) {
+                      cmd.append("settings put secure touch_slop 0 >/dev/null 2>&1\n");
+                      cmd.append("settings put system touch_slop 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot deep_press_enabled 0 >/dev/null 2>&1\n");
+                      cmd.append("device_config put input_native_boot palm_rejection_enabled 0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure touch_exploration_enabled 0 >/dev/null 2>&1\n");
+                  }
+
+                  // 4. SMOOTH AIM (UNLOCK FPS & HAPUS DELAY FRAME)
+                  if (smoothAimOn) {
+                      cmd.append("settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put system min_refresh_rate 120.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put secure user_refresh_rate 120 >/dev/null 2>&1\n");
+                      cmd.append("settings put global tran_refresh_rate_mode 120 >/dev/null 2>&1\n");
+                      cmd.append("setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1\n");
+                      cmd.append("setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1\n");
+                      cmd.append("setprop debug.performance.tuning 1 >/dev/null 2>&1\n");
+                      cmd.append("settings put global window_animation_scale 0.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put global transition_animation_scale 0.0 >/dev/null 2>&1\n");
+                      cmd.append("settings put global animator_duration_scale 0.0 >/dev/null 2>&1\n");
+                      cmd.append("cmd thermalservice override-status 0 >/dev/null 2>&1\n");
+                      cmd.append("cmd power set-fixed-performance-mode-enabled true >/dev/null 2>&1\n");
+                  }
+
+                  // 5. AIM LEGIT & INJEKSI LANGSUNG KE SELURUH SUB-THREAD UNITY FREE FIRE (UnityMain, UnityGfxDeviceW, InputReader)
+                  if (aimLegitOn || aimMerahOn || easyDragOn) {
+                      int niceVal = -(currentSensi * 2 + 6); // Level 7 = -20 (Prioritas Maksimum)
+                      cmd.append("cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1\n");
+                      cmd.append("cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1\n");
+                      cmd.append("am set-standby-bucket com.dts.freefireth active >/dev/null 2>&1\n");
+                      cmd.append("am set-standby-bucket com.dts.freefiremax active >/dev/null 2>&1\n");
+                      cmd.append("cmd appops set com.dts.freefireth RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
+                      cmd.append("cmd appops set com.dts.freefiremax RUN_IN_BACKGROUND allow >/dev/null 2>&1\n");
+                      cmd.append(
+                          "for p in $(pidof com.dts.freefireth com.dts.freefiremax); do " +
+                          "  renice -n -20 -p $p >/dev/null 2>&1; " +
+                          "  ionice -c 1 -n 0 -p $p >/dev/null 2>&1; " +
+                          "  for t in $(ls /proc/$p/task 2>/dev/null); do " +
+                          "    renice -n " + niceVal + " -p $t >/dev/null 2>&1; " +
+                          "    ionice -c 1 -n 0 -p $t >/dev/null 2>&1; " +
+                          "    taskset -p ff $t >/dev/null 2>&1; " +
+                          "  done; " +
+                          "done\n"
+                      );
+                  }
+
+                  return cmd.toString();
               }
 
               private void executeShizukuSilent(String script) {
@@ -602,15 +323,11 @@ jobs:
                   bgExecutor.execute(() -> {
                       try {
                           if (!Shizuku.pingBinder()) {
-                              runOnUiThread(() -> {
-                                  webView.evaluateJavascript("onSaveComplete()", null);
-                                  Toast.makeText(MainActivity.this, "Shizuku belum berjalan!", Toast.LENGTH_LONG).show();
-                              });
+                              runOnUiThread(() -> Toast.makeText(MainActivity.this, "Shizuku belum berjalan!", Toast.LENGTH_LONG).show());
                               return;
                           }
                           if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
                               runOnUiThread(() -> {
-                                  webView.evaluateJavascript("onSaveComplete()", null);
                                   Shizuku.requestPermission(101);
                                   Toast.makeText(MainActivity.this, "Izinkan pop-up Shizuku terlebih dahulu", Toast.LENGTH_LONG).show();
                               });
@@ -631,15 +348,9 @@ jobs:
 
                           p.waitFor();
 
-                          runOnUiThread(() -> {
-                              webView.evaluateJavascript("onSaveComplete()", null);
-                              Toast.makeText(MainActivity.this, toastMsg, Toast.LENGTH_SHORT).show();
-                          });
+                          runOnUiThread(() -> Toast.makeText(MainActivity.this, toastMsg, Toast.LENGTH_SHORT).show());
                       } catch (Throwable e) {
-                          runOnUiThread(() -> {
-                              webView.evaluateJavascript("onSaveComplete()", null);
-                              Toast.makeText(MainActivity.this, "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                          });
+                          runOnUiThread(() -> Toast.makeText(MainActivity.this, "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show());
                       }
                   });
               }
@@ -663,6 +374,7 @@ jobs:
                               }
                               if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                                   webView.evaluateJavascript("setShizukuStatus(true)", null);
+                                  cleanLeftoverGraphicHooks();
                               } else {
                                   Shizuku.requestPermission(101);
                               }
@@ -681,119 +393,49 @@ jobs:
                       });
                   }
 
-                  // INJEKSI TEKSTUR KOTAK-KOTAK + MODE RINGAN (HANYA DIEKSEKUSI SAAT KLIK SIMPAN AGAR TIDAK MENTAL!)
                   @JavascriptInterface
-                  public void applyGraphicStudio(boolean enableTex, int texLevel, boolean sharpPixel, boolean hardLod, boolean enableLight, int resPercent) {
-                      String ffPkg = getInstalledFFPackage();
-                      String nativeDir = getApplicationInfo().nativeLibraryDir;
-                      StringBuilder cmd = new StringBuilder();
+                  public void updateModule(int id, String name, boolean on, int sensi) {
+                      currentSensi = sensi;
+                      if (id == 1) aimMerahOn = on;
+                      else if (id == 2) easyDragOn = on;
+                      else if (id == 3) smoothAimOn = on;
+                      else if (id == 4) aimLegitOn = on;
+                      else if (id == 5) sensiActive = on;
 
-                      // 1. Hapus driver ANGLE penyebab mental (force-close) di HP Infinix
-                      cmd.append("settings delete global angle_gl_driver_selection_pkgs >/dev/null 2>&1\n");
-                      cmd.append("settings delete global angle_gl_driver_selection_values >/dev/null 2>&1\n");
-                      cmd.append("settings put global angle_gl_driver_all_angle 0 >/dev/null 2>&1\n");
-
-                      // 2. Bersihkan flag downscale lama
-                      String[] compatFlags = {"DOWNSCALED","DOWNSCALE_90","DOWNSCALE_85","DOWNSCALE_80","DOWNSCALE_75","DOWNSCALE_70","DOWNSCALE_65","DOWNSCALE_60","DOWNSCALE_55","DOWNSCALE_50","DOWNSCALE_45","DOWNSCALE_40","DOWNSCALE_35","DOWNSCALE_30"};
-                      for (String f : compatFlags) {
-                          cmd.append("am compat reset ").append(f).append(" com.dts.freefireth >/dev/null 2>&1\n");
-                          cmd.append("am compat reset ").append(f).append(" com.dts.freefiremax >/dev/null 2>&1\n");
-                      }
-
-                      if (!enableTex && !enableLight) {
-                          cmd.append("setprop debug.gles.layers \"\"\n");
-                          cmd.append("rm -f /data/local/tmp/m.so >/dev/null 2>&1\n");
-                          cmd.append("settings delete global enable_gpu_debug_layers >/dev/null 2>&1\n");
-                          cmd.append("settings delete global gpu_debug_app >/dev/null 2>&1\n");
-                          cmd.append("settings delete global gpu_debug_layer_app >/dev/null 2>&1\n");
-                          cmd.append("settings delete global gpu_debug_layers_gles >/dev/null 2>&1\n");
-                          cmd.append("device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n");
-                          cmd.append("device_config delete game_overlay com.dts.freefiremax >/dev/null 2>&1\n");
-                          cmd.append("cmd game reset com.dts.freefireth >/dev/null 2>&1\n");
-                          cmd.append("cmd game reset com.dts.freefiremax >/dev/null 2>&1\n");
-                          cmd.append("am force-stop com.dts.freefireth >/dev/null 2>&1\n");
-                          cmd.append("am force-stop com.dts.freefiremax >/dev/null 2>&1\n");
-                          executeShizukuClean(cmd.toString(), "Sistem Grafik Free Fire Direset ke Asli!");
-                          return;
-                      }
-
-                      // 3. Pasang OpenGL ES Blocky Texture Layer (libmc_*.so) via Symlink Path Traversal agar terbaca oleh libEGL.so Free Fire
-                      if (enableTex && texLevel > 1) {
-                          String libName = "libmc_kotak.so";
-                          if (texLevel == 2 || !sharpPixel) libName = "libmc_ringan.so";
-                          else if (texLevel == 3) libName = "libmc_retro.so";
-                          else if (texLevel == 4) libName = "libmc_kotak.so";
-                          else if (texLevel >= 5) libName = "libmc_ekstrem.so";
-
-                          String fullLibPath = nativeDir + "/" + libName;
-
-                          // Beri izin baca & buat symlink pendek /data/local/tmp/m.so menuju apk_data_file asli
-                          cmd.append("chmod 755 ").append(nativeDir).append(" ").append(fullLibPath).append(" >/dev/null 2>&1\n");
-                          cmd.append("ln -sf ").append(fullLibPath).append(" /data/local/tmp/m.so >/dev/null 2>&1\n");
-                          cmd.append("chmod 755 /data/local/tmp /data/local/tmp/m.so >/dev/null 2>&1\n");
-
-                          // Traverse dari mLayerPaths Free Fire (/data/app/.../lib/arm64) ke /data/local/tmp/m.so (Muat di bawah batas 91 karakter setprop!)
-                          cmd.append("setprop debug.gles.layers ../../../../../../../data/local/tmp/m.so:").append(libName).append("\n");
-
-                          cmd.append("settings put global enable_gpu_debug_layers 1 >/dev/null 2>&1\n");
-                          cmd.append("settings put global gpu_debug_app ").append(ffPkg).append(" >/dev/null 2>&1\n");
-                          cmd.append("settings put global gpu_debug_layer_app com.danzstraight.mod >/dev/null 2>&1\n");
-                          cmd.append("settings put global gpu_debug_layers_gles ").append(libName).append(" >/dev/null 2>&1\n");
-                      } else {
-                          cmd.append("setprop debug.gles.layers \"\"\n");
-                          cmd.append("rm -f /data/local/tmp/m.so >/dev/null 2>&1\n");
-                      }
-
-                      // 4. Hitung Skala Render (Hanya dieksekusi 1x saat Simpan agar tidak pernah bikin mental di tengah game!)
-                      int targetPct = enableLight ? resPercent : 85;
-                      if (enableTex && texLevel > 1) {
-                          int texPct = 85;
-                          if (texLevel == 2) texPct = 75;
-                          else if (texLevel == 3) texPct = 65;
-                          else if (texLevel == 4) texPct = 55;
-                          else if (texLevel >= 5) texPct = 45;
-                          if (!enableLight || texPct < targetPct) {
-                              targetPct = texPct;
-                          }
-                      }
-
-                      String compatName = "DOWNSCALE_" + targetPct;
-                      String factorStr = (targetPct % 10 == 0) ? ("0." + (targetPct / 10)) : ("0." + targetPct);
-
-                      cmd.append("am compat enable DOWNSCALED com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("am compat enable DOWNSCALED com.dts.freefiremax >/dev/null 2>&1\n");
-                      cmd.append("am compat enable ").append(compatName).append(" com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("am compat enable ").append(compatName).append(" com.dts.freefiremax >/dev/null 2>&1\n");
-
-                      // TANPA useAngle=true agar GPU Mali tidak pernah force-close!
-                      String overlayRule = "mode=1,downscaleFactor=" + factorStr +
-                                           ":mode=2,downscaleFactor=" + factorStr +
-                                           ":mode=3,downscaleFactor=" + factorStr;
-                      cmd.append("device_config put game_overlay com.dts.freefireth ").append(overlayRule).append(" >/dev/null 2>&1\n");
-                      cmd.append("device_config put game_overlay com.dts.freefiremax ").append(overlayRule).append(" >/dev/null 2>&1\n");
-                      cmd.append("cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n");
-                      cmd.append("cmd game downscale ").append(factorStr).append(" com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("cmd game downscale ").append(factorStr).append(" com.dts.freefiremax >/dev/null 2>&1\n");
-
-                      // 5. Bersihkan Shader Cache & Aktifkan Sensitivitas Licin
-                      cmd.append("rm -rf /sdcard/Android/data/com.dts.freefireth/cache/UnityShaderCache/* >/dev/null 2>&1\n");
-                      cmd.append("rm -rf /sdcard/Android/data/com.dts.freefiremax/cache/UnityShaderCache/* >/dev/null 2>&1\n");
-                      cmd.append(buildSafeSlipperyAimScript(currentSensi));
-
-                      // 6. Tutup Free Fire saat klik Simpan agar ketika dibuka langsung memuat tekstur kotak tanpa mental
-                      cmd.append("am force-stop com.dts.freefireth >/dev/null 2>&1\n");
-                      cmd.append("am force-stop com.dts.freefiremax >/dev/null 2>&1\n");
-
-                      startInGameTouchWatcher();
-                      executeShizukuClean(cmd.toString(), "Tersimpan (Anti-Mental + Tekstur Kotak)! Silakan buka Free Fire.");
+                      startInGameAimWatcher();
+                      String script = buildFullFFSystemScript(id == 1 && on);
+                      executeShizukuClean(script, name + (on ? " Aktif di Sistem FF!" : " Nonaktif"));
                   }
 
                   @JavascriptInterface
-                  public void runAimModule(int id, String name, boolean on, int sensi) {
-                      currentSensi = sensi;
-                      startInGameTouchWatcher();
-                      executeShizukuClean(buildSafeSlipperyAimScript(sensi), name + (on ? " Aktif (Layar Licin & Stabil)!" : " Diperbarui"));
+                  public void injectAllMax() {
+                      aimMerahOn = true;
+                      easyDragOn = true;
+                      smoothAimOn = true;
+                      aimLegitOn = true;
+                      sensiActive = true;
+                      cleanLeftoverGraphicHooks();
+                      startInGameAimWatcher();
+                      executeShizukuClean(buildFullFFSystemScript(true), "Semua Modul Aim Headshot & Layar Licin Terinjeksi ke FF!");
+                  }
+
+                  @JavascriptInterface
+                  public void resetDefault() {
+                      autoWatcherRunning = false;
+                      cleanLeftoverGraphicHooks();
+                      String resetCmd =
+                          "device_config delete input_native_boot velocitytracker_strategy >/dev/null 2>&1\n" +
+                          "device_config delete input_native_boot resample_touch >/dev/null 2>&1\n" +
+                          "settings put system pointer_speed 0 >/dev/null 2>&1\n" +
+                          "settings delete secure touch_slop >/dev/null 2>&1\n" +
+                          "settings put secure long_press_timeout 400 >/dev/null 2>&1\n" +
+                          "settings put secure multi_press_timeout 300 >/dev/null 2>&1\n" +
+                          "settings put global window_animation_scale 1.0 >/dev/null 2>&1\n" +
+                          "settings put global transition_animation_scale 1.0 >/dev/null 2>&1\n" +
+                          "settings put global animator_duration_scale 1.0 >/dev/null 2>&1\n" +
+                          "cmd thermalservice reset >/dev/null 2>&1\n" +
+                          "cmd power set-fixed-performance-mode-enabled false >/dev/null 2>&1\n";
+                      executeShizukuClean(resetCmd, "Semua Pengaturan Dikembalikan ke Standar");
                   }
 
                   @JavascriptInterface
@@ -804,16 +446,21 @@ jobs:
                   @JavascriptInterface
                   public void launchFreeFire() {
                       runOnUiThread(() -> {
-                          startInGameTouchWatcher();
+                          cleanLeftoverGraphicHooks();
+                          startInGameAimWatcher();
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
                           if (i != null) {
                               i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                               startActivity(i);
+                              // Tunggu 4 detik hingga mesin UnityMain Free Fire terbuka, lalu suntikkan prioritas & pelicin layar!
                               mainHandler.postDelayed(() -> {
-                                  executeShizukuSilent(buildSafeSlipperyAimScript(currentSensi));
-                              }, 4500);
+                                  executeShizukuClean(
+                                      buildFullFFSystemScript(false),
+                                      "Aim Headshot & Sensi Super Licin Aktif di In-Game!"
+                                  );
+                              }, 4000);
                           } else {
                               Toast.makeText(MainActivity.this, "Silakan buka aplikasi Free Fire", Toast.LENGTH_LONG).show();
                           }
@@ -823,6 +470,7 @@ jobs:
           }
           EOF
 
+          # Antarmuka V16: Bersih, Tanpa Grafik MC, Fokus Penuh pada Aim Headshot & Pelicin Layar + Admin Key
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -831,137 +479,93 @@ jobs:
           <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
           <style>
             :root {
-              --bg: #0D1117;
-              --card: #151B23;
-              --card-2: #1B222C;
-              --border: #293241;
-              --cyan: #8CE0FF;
-              --cyan-glow: rgba(140, 224, 255, 0.25);
+              --bg: #0B0E14;
+              --card: #131822;
+              --card-2: #1A212E;
+              --border: #263042;
+              --accent: #00E5FF;
+              --accent-glow: rgba(0, 229, 255, 0.22);
+              --green: #00E676;
               --text: #F0F6FC;
               --muted: #8B949E;
-              --danger: #F85149;
+              --danger: #FF3B30;
             }
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, Roboto, sans-serif; user-select: none; }
-            body { background: var(--bg); color: var(--text); padding: 12px; padding-bottom: 95px; }
+            body { background: var(--bg); color: var(--text); padding: 14px; padding-bottom: 88px; }
             .hidden { display: none !important; }
 
+            /* LOGIN GATE */
             .login-wrap { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
             .login-box { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
-            .brand-title { font-size: 19px; font-weight: 800; letter-spacing: 0.5px; }
-            .brand-sub { font-size: 12px; color: var(--muted); margin: 3px 0 16px; }
+            .brand-title { font-size: 20px; font-weight: 900; letter-spacing: 0.5px; }
+            .brand-title span { color: var(--accent); }
+            .brand-sub { font-size: 11px; color: var(--muted); margin: 4px 0 16px; }
             .box-inner { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
             .row-sb { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 8px; }
             .pill { font-size: 11px; padding: 3px 9px; border-radius: 20px; background: #331B1B; color: var(--danger); font-weight: 700; }
-            .pill.ok { background: #123524; color: #56D364; }
+            .pill.ok { background: #103321; color: var(--green); }
             .inp { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; color: #fff; padding: 12px; font-size: 13px; margin-bottom: 12px; outline: none; }
-            .btn-cyan { width: 100%; background: var(--cyan); color: #061824; border: none; border-radius: 12px; padding: 13px; font-size: 14px; font-weight: 800; box-shadow: 0 0 18px var(--cyan-glow); cursor: pointer; }
-            .btn-dark { width: 100%; background: var(--card-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 12px; font-weight: 700; }
+            .btn-main { width: 100%; background: var(--accent); color: #04141C; border: none; border-radius: 12px; padding: 13px; font-size: 14px; font-weight: 900; box-shadow: 0 0 18px var(--accent-glow); cursor: pointer; }
+            .btn-dark { width: 100%; background: var(--card-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
 
-            .top-tabs { display: flex; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 5px; margin-bottom: 14px; }
-            .tab-pill { flex: 1; text-align: center; padding: 9px 6px; border-radius: 12px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; transition: 0.15s; }
-            .tab-pill.active { background: var(--cyan); color: #051622; box-shadow: 0 0 14px var(--cyan-glow); }
+            /* HEADER */
+            .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+            .btn-rst { background: #26161B; color: #FF6B6B; border: 1px solid #4A222A; padding: 7px 11px; border-radius: 8px; font-size: 11px; font-weight: 700; }
 
-            .preview-card { position: relative; width: 100%; height: 185px; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 12px; background: #1a2418; }
-            .prev-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
-            .tex-before {
-              background:
-                linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.4) 100%),
-                repeating-linear-gradient(90deg, #5c4d3c 0px, #5c4d3c 28px, #2b231b 28px, #2b231b 30px),
-                repeating-linear-gradient(0deg, #6e5d49 0px, #6e5d49 14px, #2b231b 14px, #2b231b 16px);
-              background-blend-mode: overlay;
-            }
-            .tex-ground-before {
-              position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
-              background: radial-gradient(circle at 30% 40%, #3b5e2b, #28421d 60%, #4a3c2c 100%);
-              border-top: 2px solid #222;
-            }
-            .tex-after {
-              clip-path: polygon(50% 0, 100% 0, 100% 100%, 50% 100%);
-              background:
-                linear-gradient(135deg, #6b5c4c 25%, #594b3d 25%, #594b3d 50%, #6b5c4c 50%, #6b5c4c 75%, #473b30 75%);
-              background-size: 48px 48px;
-              image-rendering: pixelated;
-            }
-            .tex-ground-after {
-              position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
-              background:
-                conic-gradient(#3f6a2e 90deg, #345826 90deg 180deg, #4b5d30 180deg 270deg, #2e4d21 270deg);
-              background-size: 44px 44px;
-              image-rendering: pixelated;
-            }
+            /* STATUS BANNER */
+            .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+            .st-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+            .st-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+            .st-val { font-size: 13px; font-weight: 800; color: var(--green); margin-top: 3px; }
 
-            .res-before { background: linear-gradient(180deg, #0d1b2a 0%, #1b263b 60%, #2b3240 60%, #1e242d 100%); }
-            .res-after {
-              clip-path: polygon(50% 0, 100% 0, 100% 100%, 50% 100%);
-              background: linear-gradient(180deg, #0d1b2a 0%, #1b263b 60%, #2b3240 60%, #1e242d 100%);
-              filter: blur(1.6px) contrast(0.95);
-            }
-            .city-dots {
-              position: absolute; top: 28%; left: 0; right: 0; height: 32%;
-              background-image: radial-gradient(#ffd166 1.5px, transparent 1.5px);
-              background-size: 12px 12px;
-            }
+            /* SENSITIVITAS PELICIN LAYAR CARD */
+            .sensi-card { background: linear-gradient(145deg, #151E2E, #111622); border: 1.5px solid var(--accent); border-radius: 14px; padding: 14px; margin-bottom: 14px; box-shadow: 0 0 16px var(--accent-glow); }
+            .sensi-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+            .sensi-title { font-size: 15px; font-weight: 900; color: var(--accent); }
+            .sensi-desc { font-size: 11px; color: var(--muted); margin-bottom: 12px; line-height: 1.35; }
+            .range-styled { -webkit-appearance: none; width: 100%; height: 7px; border-radius: 4px; background: #263042; outline: none; margin-bottom: 10px; }
+            .range-styled::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); box-shadow: 0 0 10px var(--accent); cursor: pointer; }
+            .ticks-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-weight: 700; }
+            .ticks-row span.active { color: var(--accent); font-weight: 900; }
 
-            .badge-lbl { position: absolute; top: 10px; background: rgba(13, 17, 23, 0.78); color: #d0d7de; font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 4px 9px; border-radius: 6px; z-index: 5; }
-            .badge-lbl.left { left: 10px; }
-            .badge-lbl.right { right: 10px; }
-            .split-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #fff; z-index: 6; }
-            .split-handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 34px; height: 34px; border-radius: 50%; background: #fff; color: #000; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,0.6); z-index: 7; }
-            .split-range { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; z-index: 10; cursor: ew-resize; }
+            /* AIM MODULE CARDS */
+            .sec-title { font-size: 11px; color: var(--muted); font-weight: 800; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+            .aim-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 13px 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; transition: 0.15s; }
+            .aim-card.on { border-color: #235C42; background: linear-gradient(145deg, #131822 60%, #0F261D 100%); }
+            .aim-title { font-size: 14px; font-weight: 800; margin-bottom: 3px; }
+            .aim-sub { font-size: 11px; color: var(--muted); line-height: 1.3; padding-right: 10px; }
 
-            .game-bar { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 11px 14px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-            .game-title { font-size: 14px; font-weight: 800; }
-            .game-sub { font-size: 11px; color: var(--muted); }
-
-            .sec-label { font-size: 11px; color: var(--muted); letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 8px; font-weight: 700; }
-            .preset-bar { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 4px; gap: 4px; margin-bottom: 16px; }
-            .preset-btn { background: transparent; color: var(--text); border: none; padding: 9px 4px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
-            .preset-btn.active { background: var(--cyan); color: #051622; box-shadow: 0 0 12px var(--cyan-glow); }
-
-            .slider-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
-            .slider-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 14px; font-weight: 700; }
-            .slider-val-txt { color: var(--cyan); font-weight: 800; }
-            .range-styled { -webkit-appearance: none; width: 100%; height: 6px; border-radius: 4px; background: #263040; outline: none; margin-bottom: 12px; }
-            .range-styled::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid var(--cyan); box-shadow: 0 0 10px var(--cyan); cursor: pointer; }
-            .ticks-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-weight: 600; }
-            .ticks-row span.active { color: var(--cyan); font-weight: 800; }
-
-            .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
-            .opt-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; justify-content: space-between; }
-            .opt-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-            .opt-title { font-size: 13px; font-weight: 800; }
-            .opt-desc { font-size: 11px; color: var(--muted); line-height: 1.35; }
-
+            /* SWITCH */
             .sw { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
             .sw input { opacity: 0; width: 0; height: 0; }
-            .sl { position: absolute; inset: 0; background: #293241; border-radius: 24px; transition: .2s; }
-            .sl:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #0D1117; border-radius: 50%; transition: .2s; }
-            input:checked + .sl { background: var(--cyan); box-shadow: 0 0 10px var(--cyan-glow); }
-            input:checked + .sl:before { transform: translateX(20px); background: #061824; }
+            .sl { position: absolute; inset: 0; background: #263042; border-radius: 24px; transition: .2s; }
+            .sl:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #8B949E; border-radius: 50%; transition: .2s; }
+            input:checked + .sl { background: var(--green); }
+            input:checked + .sl:before { transform: translateX(20px); background: #041F11; }
 
-            .notes-box { font-size: 11px; color: var(--muted); line-height: 1.6; margin-bottom: 14px; padding: 0 4px; }
+            /* ACTION BUTTONS */
+            .btn-row { display: flex; gap: 10px; margin-top: 6px; margin-bottom: 14px; }
+            .btn-inject { flex: 1; background: var(--card-2); color: var(--accent); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; font-size: 13px; font-weight: 800; cursor: pointer; }
 
-            .action-row { display: flex; gap: 10px; margin-bottom: 14px; }
-            .btn-reset { flex: 1; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 13px; font-size: 13px; font-weight: 800; cursor: pointer; }
-            .btn-save { flex: 1.8; background: var(--cyan); color: #051622; border: none; border-radius: 14px; padding: 13px; font-size: 14px; font-weight: 900; box-shadow: 0 0 20px var(--cyan-glow); cursor: pointer; transition: 0.15s; }
-            .btn-save:active { transform: scale(0.98); }
-
-            .aim-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 13px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+            /* ADMIN KEY PANEL */
+            .dev-panel { background: var(--card); border: 1px solid var(--accent); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
             .key-item { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
             .sm-btn { background: var(--card-2); color: #fff; border: 1px solid var(--border); padding: 5px 8px; border-radius: 6px; font-size: 10px; margin-left: 4px; }
             .sm-btn.stop { background: #5a1818; border-color: var(--danger); }
 
+            /* BOTTOM NAV */
             .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 56px; background: var(--card); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; z-index: 90; }
             .nav-it { font-size: 12px; color: var(--muted); font-weight: 700; padding: 8px 12px; cursor: pointer; }
-            .nav-it.active { color: var(--cyan); border-bottom: 2px solid var(--cyan); }
+            .nav-it.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
           </style>
           </head>
           <body>
 
+            <!-- GERBANG AWAL SHIZUKU & LISENSI 1 KEY 1 DEVICE -->
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
-                <div class="brand-title">DANZSTRAIGHT</div>
-                <div class="brand-sub">Anti-Crash & Blocky Texture Hook v15.0</div>
+                <div class="brand-title">DANZ<span>STRAIGHT</span></div>
+                <div class="brand-sub">Pure Aim Headshot & Slippery Sensi v16.0</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -979,213 +583,115 @@ jobs:
                 </div>
 
                 <input type="text" class="inp" id="key-input" placeholder="Masukkan License Key (1 Key 1 Device)">
-                <button class="btn-cyan" onclick="verifyKey()">Masuk Aplikasi</button>
+                <button class="btn-main" onclick="verifyKey()">Masuk Aplikasi</button>
               </div>
             </div>
 
-            <div class="top-tabs">
-              <div class="tab-pill active" id="tab-btn-tex" onclick="openSection('tex')">Tekstur</div>
-              <div class="tab-pill" id="tab-btn-light" onclick="openSection('light')">Mode Ringan</div>
-              <div class="tab-pill" id="tab-btn-aim" onclick="openSection('aim')">Aim & Sensi</div>
+            <!-- HEADER -->
+            <div class="header">
+              <div>
+                <div class="brand-title">DANZ<span>STRAIGHT</span></div>
+                <div style="font-size:11px;color:var(--muted)">Direct Free Fire Aim & Touch Injector</div>
+              </div>
+              <button class="btn-rst" onclick="AndroidBridge.resetDefault()">Reset Standar</button>
             </div>
 
-            <!-- TAB 1: TEKSTUR -->
-            <div id="sec-tex">
-              <div class="preview-card">
-                <div class="prev-layer tex-before">
-                  <div class="tex-ground-before"></div>
-                </div>
-                <div class="prev-layer tex-after" id="tex-after-layer">
-                  <div class="tex-ground-after" id="tex-ground-after"></div>
-                </div>
-                <div class="badge-lbl left">SEBELUM</div>
-                <div class="badge-lbl right">SESUDAH</div>
-                <div class="split-line" id="tex-line"></div>
-                <div class="split-handle" id="tex-handle">&leftrightarrow;</div>
-                <input type="range" min="5" max="95" value="50" class="split-range" oninput="moveSplit('tex', this.value)">
+            <div class="status-grid">
+              <div class="st-card">
+                <div class="st-lbl">Target Sistem</div>
+                <div class="st-val">Free Fire / FF MAX</div>
               </div>
-
-              <div class="game-bar">
-                <div>
-                  <div class="game-title">Free Fire</div>
-                  <div class="game-sub">Aktifkan Tekstur Kotak-Kotak (Anti-Mental)</div>
-                </div>
-                <label class="sw"><input type="checkbox" id="sw-ff-tex" checked><span class="sl"></span></label>
-              </div>
-
-              <div class="sec-label">PRESET CEPAT</div>
-              <div class="preset-bar">
-                <button class="preset-btn" id="pr-halus" onclick="selectPreset('halus')">Halus</button>
-                <button class="preset-btn" id="pr-retro" onclick="selectPreset('retro')">Retro</button>
-                <button class="preset-btn" id="pr-kotak" onclick="selectPreset('kotak')">Kotak Total</button>
-                <button class="preset-btn active" id="pr-kustom" onclick="selectPreset('kustom')">Kustom</button>
-              </div>
-
-              <div class="slider-card">
-                <div class="slider-head">
-                  <span>Detail Tekstur</span>
-                  <span class="slider-val-txt" id="tex-lvl-name">Ekstrem</span>
-                </div>
-                <input type="range" min="1" max="5" step="1" value="5" class="range-styled" id="tex-slider" oninput="onTexSliderChange(this.value)">
-                <div class="ticks-row">
-                  <span id="tk-1">Asli</span>
-                  <span id="tk-2">Ringan</span>
-                  <span id="tk-3">Retro</span>
-                  <span id="tk-4">Kotak</span>
-                  <span id="tk-5" class="active">Ekstrem</span>
-                </div>
-              </div>
-
-              <div class="two-col">
-                <div class="opt-card">
-                  <div class="opt-top">
-                    <span class="opt-title">Piksel Tajam</span>
-                    <label class="sw"><input type="checkbox" id="sw-sharp" checked onchange="updateTexVisual()"><span class="sl"></span></label>
-                  </div>
-                  <div class="opt-desc">Tepi tekstur kotak-kotak. Matikan untuk efek buram halus.</div>
-                </div>
-
-                <div class="opt-card">
-                  <div class="opt-top">
-                    <span class="opt-title">Batas Jarak Tegas</span>
-                    <label class="sw"><input type="checkbox" id="sw-lod" checked onchange="updateTexVisual()"><span class="sl"></span></label>
-                  </div>
-                  <div class="opt-desc">Perpindahan detail dekat-jauh jadi patah-patah.</div>
-                </div>
-              </div>
-
-              <div class="notes-box">
-                <div>&#9432; Sudah diperbaiki: Bebas force-close / mental saat membuka Free Fire.</div>
-                <div>&#9728; Klik Simpan terlebih dahulu sebelum menekan Buka Free Fire.</div>
-              </div>
-
-              <div class="action-row">
-                <button class="btn-reset" onclick="resetGraphicStudio()">Reset ke Asli</button>
-                <button class="btn-save" id="btn-save-1" onclick="saveGraphicStudio()">Simpan</button>
+              <div class="st-card">
+                <div class="st-lbl">Status Injeksi</div>
+                <div class="st-val" id="st-txt">Auto-Hook Aktif</div>
               </div>
             </div>
 
-            <!-- TAB 2: MODE RINGAN -->
-            <div id="sec-light" class="hidden">
-              <div class="preview-card">
-                <div class="prev-layer res-before">
-                  <div class="city-dots"></div>
-                </div>
-                <div class="prev-layer res-after" id="res-after-layer">
-                  <div class="city-dots"></div>
-                </div>
-                <div class="badge-lbl left">SEBELUM</div>
-                <div class="badge-lbl right">SESUDAH</div>
-                <div class="split-line" id="res-line"></div>
-                <div class="split-handle" id="res-handle">&leftrightarrow;</div>
-                <input type="range" min="5" max="95" value="50" class="split-range" oninput="moveSplit('res', this.value)">
+            <!-- 1. FITUR UTAMA: SENSITIVITAS PELICIN LAYAR IN-GAME -->
+            <div class="sensi-card">
+              <div class="sensi-head">
+                <span class="sensi-title">Sensivity Pelicin Layar FF</span>
+                <label class="sw"><input type="checkbox" id="sw-5" checked onchange="trigMod(5,'Sensivity Pelicin')"><span class="sl"></span></label>
               </div>
-
-              <div class="game-bar">
-                <div>
-                  <div class="game-title">Free Fire</div>
-                  <div class="game-sub">Aktifkan Mode Ringan (45% - 90%)</div>
-                </div>
-                <label class="sw"><input type="checkbox" id="sw-ff-light" checked><span class="sl"></span></label>
+              <div class="sensi-desc">
+                Mematikan jeda interpolasi sentuhan (<i>resample_touch 0</i>) & membuka sensitivitas XArena 100% agar geser layar sedikit saja langsung licin di dalam game.
               </div>
-
-              <div class="slider-card">
-                <div class="slider-head">
-                  <span>Resolusi game</span>
-                  <span class="slider-val-txt" id="res-val-txt">50%</span>
-                </div>
-                <input type="range" min="45" max="90" step="5" value="50" class="range-styled" id="res-slider" oninput="onResSliderChange(this.value)">
-                <div class="ticks-row">
-                  <span>45% (Ekstrem)</span>
-                  <span class="active">50% (Kotak & Licin)</span>
-                  <span>90%</span>
-                </div>
+              <div class="row-sb" style="margin-bottom:8px">
+                <span style="font-size:12px;font-weight:700">Tingkat Kelicinan Geser:</span>
+                <b style="font-size:13px;color:var(--accent)" id="sensi-txt">Level 7 (Super Licin)</b>
               </div>
-
-              <div class="notes-box">
-                <div>&#9432; Hanya dieksekusi saat klik Simpan agar tidak mental saat di dalam game.</div>
-                <div>&#8634; Klik Simpan lalu buka Free Fire.</div>
-              </div>
-
-              <div class="action-row">
-                <button class="btn-reset" onclick="resetGraphicStudio()">Reset ke Bawaan</button>
-                <button class="btn-save" id="btn-save-2" onclick="saveGraphicStudio()">Simpan</button>
+              <input type="range" min="1" max="7" step="1" value="7" class="range-styled" id="sensi-slider" oninput="onSensiSlide(this.value)" onchange="onSensiChange(this.value)">
+              <div class="ticks-row">
+                <span>Lv.1 (Ringan)</span>
+                <span>Lv.4 (Cepat)</span>
+                <span class="active">Lv.7 (Geser Sedikit Licin)</span>
               </div>
             </div>
 
-            <!-- TAB 3: AIM & SENSITIVITAS -->
-            <div id="sec-aim" class="hidden">
-              <div class="aim-card">
-                <div>
-                  <div class="game-title">Aim Merah (Drag HS)</div>
-                  <div class="game-sub">Impulse Velocity + Prioritas UnityMain (-20)</div>
-                </div>
-                <label class="sw"><input type="checkbox" id="sw-aim-1" checked onchange="trigAim(1,'Aim Merah')"><span class="sl"></span></label>
-              </div>
+            <!-- 2. MODUL AIM HEADSHOT SISTEM FREE FIRE -->
+            <div class="sec-title">MODUL AIM SISTEM FREE FIRE</div>
 
-              <div class="aim-card">
-                <div>
-                  <div class="game-title">Easy Drag (Geser Sedikit Licin)</div>
-                  <div class="game-sub">XArena Touch Sensitivity 100 + Touch Slop 0px</div>
-                </div>
-                <label class="sw"><input type="checkbox" id="sw-aim-2" checked onchange="trigAim(2,'Easy Drag')"><span class="sl"></span></label>
+            <div class="aim-card on" id="card-1">
+              <div>
+                <div class="aim-title">Aim Merah (Drag HS)</div>
+                <div class="aim-sub">Impulse Velocity Tracker + kompilasi cepat sistem senjata Free Fire agar tarikan ke atas langsung mengarah ke kepala</div>
               </div>
-
-              <div class="aim-card">
-                <div>
-                  <div class="game-title">Smooth Aim (Unlock 90/120 FPS)</div>
-                  <div class="game-sub">Bypass Limit 58 FPS XArena + Zero Frame Delay</div>
-                </div>
-                <label class="sw"><input type="checkbox" id="sw-aim-3" checked onchange="trigAim(3,'Smooth Aim')"><span class="sl"></span></label>
-              </div>
-
-              <div class="aim-card">
-                <div>
-                  <div class="game-title">Aim Legit</div>
-                  <div class="game-sub">Safe Touch Watcher (Tidak Bikin Mental di In-Game)</div>
-                </div>
-                <label class="sw"><input type="checkbox" id="sw-aim-4" checked onchange="trigAim(4,'Aim Legit')"><span class="sl"></span></label>
-              </div>
-
-              <div class="slider-card">
-                <div class="slider-head">
-                  <span>Sensitivitas Sistem FF (1 - 7)</span>
-                  <span class="slider-val-txt" id="sensi-txt">Level 7 (Super Licin)</span>
-                </div>
-                <input type="range" min="1" max="7" step="1" value="7" class="range-styled" id="sensi-slider" oninput="onSensiSlide(this.value)" onchange="onSensiChange(this.value)">
-                <div class="ticks-row">
-                  <span>1 (Standar)</span>
-                  <span>4 (Cepat)</span>
-                  <span class="active">7 (Geser Sedikit Licin)</span>
-                </div>
-              </div>
-
-              <div class="slider-card hidden" id="dev-panel">
-                <div class="slider-head">
-                  <span style="color:var(--cyan)">Developer Key Manager</span>
-                  <span style="font-size:11px;color:var(--muted)">1 Key = 1 HP</span>
-                </div>
-                <div style="display:flex;gap:6px;margin-bottom:8px">
-                  <input type="text" class="inp" id="custom-key" placeholder="Nama Key (Kosong = Acak)" style="margin:0">
-                  <button class="btn-cyan" style="width:auto;padding:0 14px" onclick="createNewKey()">Buat</button>
-                </div>
-                <input type="text" class="inp" id="target-hwid" placeholder="Opsional: Kunci ke ID Perangkat" style="margin:0">
-                <div id="key-list"></div>
-              </div>
+              <label class="sw"><input type="checkbox" id="sw-1" checked onchange="trigMod(1,'Aim Merah (Drag HS)')"><span class="sl"></span></label>
             </div>
 
-            <button class="btn-cyan" style="margin-top:4px;margin-bottom:12px" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire Sekarang</button>
+            <div class="aim-card on" id="card-2">
+              <div>
+                <div class="aim-title">Easy Drag (Anti Nyangkut Dada)</div>
+                <div class="aim-sub">Hapus deadzone sentuhan (Touch Slop 0px) & pangkas jeda tahan tombol tembak ke 55ms</div>
+              </div>
+              <label class="sw"><input type="checkbox" id="sw-2" checked onchange="trigMod(2,'Easy Drag')"><span class="sl"></span></label>
+            </div>
+
+            <div class="aim-card on" id="card-3">
+              <div>
+                <div class="aim-title">Smooth Aim (120Hz & Zero Delay)</div>
+                <div class="aim-sub">Buka kunci FPS XArena + matikan frame backpressure agar bidikan tidak patah-patah saat war jarak dekat</div>
+              </div>
+              <label class="sw"><input type="checkbox" id="sw-3" checked onchange="trigMod(3,'Smooth Aim')"><span class="sl"></span></label>
+            </div>
+
+            <div class="aim-card on" id="card-4">
+              <div>
+                <div class="aim-title">Aim Legit (Lock Thread UnityMain)</div>
+                <div class="aim-sub">Suntikkan prioritas Real-Time (-20) langsung ke seluruh sub-thread proses Free Fire setiap 5 detik</div>
+              </div>
+              <label class="sw"><input type="checkbox" id="sw-4" checked onchange="trigMod(4,'Aim Legit')"><span class="sl"></span></label>
+            </div>
+
+            <!-- PANEL DEVELOPER KEY (MUNCUL SAAT LOGIN PAKAI DANZ-DEV-999) -->
+            <div class="dev-panel hidden" id="dev-panel">
+              <div class="row-sb" style="margin-bottom:10px">
+                <b style="color:var(--accent);font-size:13px">Developer Key Manager</b>
+                <span style="font-size:11px;color:var(--muted)">1 Key = 1 Device</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <input type="text" class="inp" id="custom-key" placeholder="Nama Key (Kosong = Acak)" style="margin:0">
+                <button class="btn-main" style="width:auto;padding:0 14px" onclick="createNewKey()">Buat Key</button>
+              </div>
+              <input type="text" class="inp" id="target-hwid" placeholder="Opsional: Kunci ke ID Perangkat" style="margin:0">
+              <div id="key-list"></div>
+            </div>
+
+            <div class="btn-row">
+              <button class="btn-inject" onclick="AndroidBridge.injectAllMax()">Simpan & Injeksi Semua</button>
+            </div>
+
+            <button class="btn-main" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire Sekarang</button>
 
             <div class="bottom-nav">
-              <div class="nav-it active" id="nav-1" onclick="openSection('tex')">Tekstur MC</div>
-              <div class="nav-it" id="nav-2" onclick="openSection('light')">Mode Ringan</div>
-              <div class="nav-it" id="nav-3" onclick="openSection('aim')">Aim & Key</div>
+              <div class="nav-it active" onclick="window.scrollTo(0,0)">Aim & Sensi</div>
+              <div class="nav-it hidden" id="nav-dev" onclick="document.getElementById('dev-panel').classList.toggle('hidden')">Panel Key</div>
+              <div class="nav-it" onclick="AndroidBridge.injectAllMax()">Simpan</div>
               <div class="nav-it" onclick="AndroidBridge.launchFreeFire()">Main FF</div>
             </div>
 
             <script>
               const DEV_KEY = "DANZ-DEV-999";
-              const LVL_NAMES = ["", "Asli", "Ringan", "Retro", "Kotak", "Ekstrem"];
               let myHwid = window.AndroidBridge ? AndroidBridge.getHwid() : "HWID-01";
               let shizukuOk = false;
 
@@ -1197,101 +703,13 @@ jobs:
                 if (ok) { p.innerText = "Terhubung"; p.classList.add('ok'); }
               }
 
-              function openSection(sec) {
-                document.getElementById('sec-tex').classList.toggle('hidden', sec !== 'tex');
-                document.getElementById('sec-light').classList.toggle('hidden', sec !== 'light');
-                document.getElementById('sec-aim').classList.toggle('hidden', sec !== 'aim');
-
-                document.getElementById('tab-btn-tex').classList.toggle('active', sec === 'tex');
-                document.getElementById('tab-btn-light').classList.toggle('active', sec === 'light');
-                document.getElementById('tab-btn-aim').classList.toggle('active', sec === 'aim');
-
-                document.getElementById('nav-1').classList.toggle('active', sec === 'tex');
-                document.getElementById('nav-2').classList.toggle('active', sec === 'light');
-                document.getElementById('nav-3').classList.toggle('active', sec === 'aim');
-              }
-
-              function moveSplit(type, val) {
-                const layer = document.getElementById(type === 'tex' ? 'tex-after-layer' : 'res-after-layer');
-                const line = document.getElementById(type === 'tex' ? 'tex-line' : 'res-line');
-                const handle = document.getElementById(type === 'tex' ? 'tex-handle' : 'res-handle');
-                layer.style.clipPath = `polygon(${val}% 0, 100% 0, 100% 100%, ${val}% 100%)`;
-                line.style.left = val + '%';
-                handle.style.left = val + '%';
-              }
-
-              function selectPreset(p) {
-                ['halus','retro','kotak','kustom'].forEach(x => {
-                  document.getElementById('pr-' + x).classList.toggle('active', x === p);
-                });
-                const sl = document.getElementById('tex-slider');
-                const sharp = document.getElementById('sw-sharp');
-                const lod = document.getElementById('sw-lod');
-                if (p === 'halus') { sl.value = 2; sharp.checked = false; lod.checked = false; }
-                else if (p === 'retro') { sl.value = 3; sharp.checked = true; lod.checked = false; }
-                else if (p === 'kotak') { sl.value = 5; sharp.checked = true; lod.checked = true; }
-                onTexSliderChange(sl.value, false);
-              }
-
-              function onTexSliderChange(val, switchToCustom = true) {
-                if (switchToCustom) {
-                  ['halus','retro','kotak','kustom'].forEach(x => {
-                    document.getElementById('pr-' + x).classList.toggle('active', x === 'kustom');
-                  });
-                }
-                document.getElementById('tex-lvl-name').innerText = LVL_NAMES[val];
-                for (let i = 1; i <= 5; i++) {
-                  document.getElementById('tk-' + i).classList.toggle('active', i == val);
-                }
-                updateTexVisual();
-              }
-
-              function updateTexVisual() {
-                const lvl = parseInt(document.getElementById('tex-slider').value);
-                const sharp = document.getElementById('sw-sharp').checked;
-                const afterLayer = document.getElementById('tex-after-layer');
-                const groundAfter = document.getElementById('tex-ground-after');
-                const pxSize = 14 + (lvl * 12);
-                afterLayer.style.backgroundSize = pxSize + 'px ' + pxSize + 'px';
-                groundAfter.style.backgroundSize = pxSize + 'px ' + pxSize + 'px';
-                afterLayer.style.filter = sharp ? 'none' : 'blur(2px)';
-              }
-
-              function onResSliderChange(val) {
-                document.getElementById('res-val-txt').innerText = val + '%';
-                document.getElementById('sw-ff-light').checked = true;
-                const blurPx = ((100 - val) / 18).toFixed(1);
-                document.getElementById('res-after-layer').style.filter = `blur(${blurPx}px)`;
-              }
-
-              function saveGraphicStudio() {
-                document.getElementById('btn-save-1').innerText = "Menyimpan...";
-                document.getElementById('btn-save-2').innerText = "Menyimpan...";
-                const enableTex = document.getElementById('sw-ff-tex').checked;
-                const texLvl = parseInt(document.getElementById('tex-slider').value);
-                const sharp = document.getElementById('sw-sharp').checked;
-                const lod = document.getElementById('sw-lod').checked;
-                const enableLight = document.getElementById('sw-ff-light').checked;
-                const resPct = parseInt(document.getElementById('res-slider').value);
-                AndroidBridge.applyGraphicStudio(enableTex, texLvl, sharp, lod, enableLight, resPct);
-              }
-
-              function onSaveComplete() {
-                document.getElementById('btn-save-1').innerText = "Simpan";
-                document.getElementById('btn-save-2').innerText = "Simpan";
-              }
-
-              function resetGraphicStudio() {
-                document.getElementById('tex-slider').value = 1;
-                document.getElementById('sw-ff-light').checked = false;
-                onTexSliderChange(1, false);
-                AndroidBridge.applyGraphicStudio(false, 1, false, false, false, 100);
-              }
-
-              function trigAim(id, name) {
-                const on = document.getElementById('sw-aim-' + id).checked;
+              function trigMod(id, name) {
+                const sw = document.getElementById('sw-' + id);
+                const card = document.getElementById('card-' + id);
+                if (card) card.classList.toggle('on', sw.checked);
                 const s = parseInt(document.getElementById('sensi-slider').value);
-                AndroidBridge.runAimModule(id, name, on, s);
+                document.getElementById('st-txt').innerText = name + (sw.checked ? " : Aktif" : " : Nonaktif");
+                AndroidBridge.updateModule(id, name, sw.checked, s);
               }
 
               function onSensiSlide(val) {
@@ -1300,21 +718,22 @@ jobs:
 
               function onSensiChange(val) {
                 onSensiSlide(val);
-                AndroidBridge.runAimModule(5, 'Sensitivitas Licin Lv.' + val, true, parseInt(val));
+                document.getElementById('sw-5').checked = true;
+                AndroidBridge.updateModule(5, 'Sensivity Licin Lv.' + val, true, parseInt(val));
               }
 
               function getKeys() {
-                const r = localStorage.getItem('danz_v15_keys');
+                const r = localStorage.getItem('danz_v16_keys');
                 if (!r) {
                   const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v15_keys', JSON.stringify(d));
+                  localStorage.setItem('danz_v16_keys', JSON.stringify(d));
                   return d;
                 }
                 return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v15_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v16_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -1330,6 +749,7 @@ jobs:
                 if (k === DEV_KEY) {
                   document.getElementById('login-screen').classList.add('hidden');
                   document.getElementById('dev-panel').classList.remove('hidden');
+                  document.getElementById('nav-dev').classList.remove('hidden');
                   renderKeyList();
                   return;
                 }
@@ -1388,8 +808,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V15 APK
+      - name: Upload DANZSTRAIGHT V16 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V15-ANTICRASH-MC
+          name: DANZSTRAIGHT-V16-PURE-AIM-SENSI
           path: clean_apk/app/build/outputs/apk/debug/*.apk
