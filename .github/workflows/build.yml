@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V31 Real InGame Engine
+name: Build DANZSTRAIGHT V32 Clean InGame Engine
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build DANZSTRAIGHT V31 50MB Real Engine APK
+      - name: Build DANZSTRAIGHT V32 50MB Clean APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -50,8 +50,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 310
-              versionName "31.0-REAL-ENGINE-50MB"
+              versionCode 320
+              versionName "32.0-INGAME-50MB"
               ndk {
                 abiFilters "arm64-v8a", "armeabi-v7a"
               }
@@ -86,26 +86,25 @@ jobs:
           }
           EOF
 
-          # 1. Payload Biner (~42 MB Uncompressed) agar Ukuran APK ~50 MB
-          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_ff_headshot_bone.bin bs=1024 count=14336
-          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_ff_headlock_matrix.dat bs=1024 count=12288
-          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_ff_aimdrag_curve.bin bs=1024 count=8192
-          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_ff_sensi_nebula.pak bs=1024 count=8192
+          # 1. Membuat 4 Paket Matriks Biner (~42 MB Uncompressed) agar Ukuran APK ~50 MB
+          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_aimbot_matrix.bin bs=1024 count=14336
+          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_aimlock_lut.dat bs=1024 count=12288
+          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_aimdrag_vector.bin bs=1024 count=8192
+          dd if=/dev/urandom of=clean_apk/app/src/main/assets/danz_sensi_nebula.pak bs=1024 count=8192
 
           # 2. Biner Daemon C++ Mandiri (/data/local/tmp/danz_ff_injector):
-          #    Mendeteksi secara real-time apakah Free Fire sedang tampil di layar (Foreground).
-          #    - Saat Free Fire di layar -> Suntikkan Matriks Koordinat & VelocityTracker langsung ke sesi Free Fire!
-          #    - Saat keluar dari Free Fire -> Otomatis kembalikan layar HP ke 100% normal dalam 0.25 detik!
+          #    Berjalan terus-menerus setiap 1.5 detik di Shizuku (UID 2000) dengan PATH lengkap
+          #    untuk menjaga seluruh fitur tetap aktif di dalam Free Fire tanpa bisa di-reset oleh XArena!
           cat << 'EOF' > clean_apk/app/src/main/cpp/danz_daemon_exec.cpp
           #include <stdio.h>
           #include <stdlib.h>
           #include <string.h>
           #include <unistd.h>
           #include <fcntl.h>
-          #include <dirent.h>
           #include <signal.h>
           #include <sys/stat.h>
           #include <sys/types.h>
+          #include <sys/resource.h>
 
           static void write_node(const char* path, const char* val) {
               int fd = open(path, O_WRONLY | O_TRUNC);
@@ -115,73 +114,139 @@ jobs:
               }
           }
 
-          // Cek apakah Free Fire sedang berada di layar depan (Foreground)
-          // Menggunakan pembacaan cepat /proc/<pid>/oom_score_adj == 0 DAN fallback dumpsys window
-          static int is_freefire_in_foreground() {
-              DIR* proc_dir = opendir("/proc");
-              if (proc_dir) {
-                  struct dirent* entry;
-                  while ((entry = readdir(proc_dir)) != nullptr) {
-                      int pid = atoi(entry->d_name);
-                      if (pid <= 100) continue;
+          static void enforce_ingame_hooks(int mask, int sensi) {
+              bool featAim       = (mask & 1) != 0;
+              bool featEasyDrag  = (mask & 2) != 0;
+              bool featSmoothAim = (mask & 4) != 0;
+              bool featAimLegit  = (mask & 8) != 0;
+              bool featSensivity = (mask & 16) != 0;
+              bool featAimDrag   = (mask & 32) != 0;
+              bool featAimLock   = (mask & 64) != 0;
+              bool featAimbot    = (mask & 128) != 0;
 
-                      char cmdline_path[64];
-                      snprintf(cmdline_path, sizeof(cmdline_path), "/proc/%d/cmdline", pid);
-                      int fd = open(cmdline_path, O_RDONLY);
-                      if (fd < 0) continue;
+              char cmd[4096];
 
-                      char pkg[128] = {0};
-                      int n = read(fd, pkg, sizeof(pkg) - 1);
-                      close(fd);
-                      if (n <= 0) continue;
-
-                      if (strstr(pkg, "com.dts.freefireth") != nullptr ||
-                          strstr(pkg, "com.dts.freefiremax") != nullptr) {
-                          char oom_path[64];
-                          snprintf(oom_path, sizeof(oom_path), "/proc/%d/oom_score_adj", pid);
-                          int ofd = open(oom_path, O_RDONLY);
-                          if (ofd >= 0) {
-                              char oom_buf[32] = {0};
-                              read(ofd, oom_buf, sizeof(oom_buf) - 1);
-                              close(ofd);
-                              int oom_val = atoi(oom_buf);
-                              // oom_score_adj <= 50 berarti aplikasi sedang aktif di layar depan (TOP_ACTIVITY)
-                              if (oom_val >= 0 && oom_val <= 50) {
-                                  closedir(proc_dir);
-                                  return 1;
-                              }
-                          }
-                      }
-                  }
-                  closedir(proc_dir);
+              // Pilih kurva VelocityTracker berdasarkan kombinasi fitur Aim yang aktif
+              const char* strat = "impulse";
+              if (featAimLock && !featAimDrag) {
+                  strat = "lsq1"; // Pengereman linear presisi di titik kepala
+              } else if (featAimbot && !featAimDrag && !featAimLock) {
+                  strat = "int1"; // Integrasi vektor micro-tracking kepala
               }
 
-              // Fallback jika kernel menyembunyikan /proc (hidepid=2): cek window yang sedang fokus
-              FILE* fp = popen("dumpsys window displays 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp'", "r");
-              if (fp) {
-                  char line[512];
-                  int focused = 0;
-                  while (fgets(line, sizeof(line), fp) != nullptr) {
-                      if (strstr(line, "com.dts.freefireth") != nullptr ||
-                          strstr(line, "com.dts.freefiremax") != nullptr) {
-                          focused = 1;
-                          break;
-                      }
-                  }
-                  pclose(fp);
-                  return focused;
+              int holdMs = (sensi >= 7) ? 100 : (210 - (sensi * 15));
+              int gSensi = (sensi >= 7) ? 100 : (sensi * 14);
+              int pollHz = (sensi >= 7) ? 360 : (180 + (sensi * 25));
+
+              // 1. Kunci Sensivity & Respons Sentuh (Menimpa pembatas XArena secara real-time di dalam game)
+              if (featSensivity || featEasyDrag || featAimDrag || featAimbot) {
+                  snprintf(cmd, sizeof(cmd),
+                      "device_config put input_native_boot resample_touch false >/dev/null 2>&1;"
+                      "device_config put input_native_boot velocitytracker_strategy %s >/dev/null 2>&1;"
+                      "device_config put input_native_boot deep_press_enabled false >/dev/null 2>&1;"
+                      "device_config put input_native_boot palm_rejection_enabled false >/dev/null 2>&1;"
+                      "device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1;"
+                      "settings put global pointer_speed 7 >/dev/null 2>&1;"
+                      "settings put system pointer_speed 7 >/dev/null 2>&1;"
+                      "settings put secure pointer_speed 7 >/dev/null 2>&1;"
+                      "settings put system pointer_acceleration 1 >/dev/null 2>&1;"
+                      "settings put global touch_slop 0 >/dev/null 2>&1;"
+                      "settings put secure touch_slop 0 >/dev/null 2>&1;"
+                      "settings put system touch_slop 0 >/dev/null 2>&1;"
+                      "settings put secure long_press_timeout %d >/dev/null 2>&1;"
+                      "settings put secure multi_press_timeout %d >/dev/null 2>&1;"
+                      "settings put global touch_sampling_rate %d >/dev/null 2>&1;"
+                      "settings put global game_touch_sampling_rate %d >/dev/null 2>&1;"
+                      "settings put global tran_touch_sampling_rate %d >/dev/null 2>&1;"
+                      "settings put global tran_game_touch_optimize 1 >/dev/null 2>&1;"
+                      "settings put global tran_game_ultrasonic_touch 1 >/dev/null 2>&1;"
+                      "settings put global tran_touch_sensitivity_level 3 >/dev/null 2>&1;"
+                      "settings put global tran_swipe_sensitivity_level 3 >/dev/null 2>&1;"
+                      "settings put global game_space_touch_sensitivity %d >/dev/null 2>&1;"
+                      "settings put global game_space_swipe_sensitivity %d >/dev/null 2>&1;"
+                      "settings put global tran_game_touch_sensitivity %d >/dev/null 2>&1;"
+                      "settings put global tran_game_swipe_sensitivity %d >/dev/null 2>&1;"
+                      "settings put system tran_game_touch_sensitivity %d >/dev/null 2>&1;"
+                      "settings put system tran_game_swipe_sensitivity %d >/dev/null 2>&1;"
+                      "settings put system high_touch_sensitivity_enable 1 >/dev/null 2>&1;"
+                      "settings put system glove_mode 1 >/dev/null 2>&1;"
+                      "settings put secure glove_mode_enabled 1 >/dev/null 2>&1;"
+                      "settings put system touch_game_mode 1 >/dev/null 2>&1;"
+                      "settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1;"
+                      "settings put system touch_sensitivity 1 >/dev/null 2>&1;",
+                      strat, holdMs, holdMs, pollHz, pollHz, pollHz,
+                      gSensi, gSensi, gSensi, gSensi, gSensi, gSensi
+                  );
+                  system(cmd);
               }
-              return 0;
+
+              // 2. Kunci Kalibrasi Aim, Aimbot, Aim Lock, & Aim Drag
+              if (featAimbot || featAim || featAimLock || featAimDrag) {
+                  snprintf(cmd, sizeof(cmd),
+                      "device_config put input_native_boot velocitytracker_strategy %s >/dev/null 2>&1;"
+                      "settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1;"
+                      "settings put system touch_blocking_period 0.0 >/dev/null 2>&1;"
+                      "settings put global touch_blocking_period 0.0 >/dev/null 2>&1;"
+                      "settings put secure accessibility_autoclick_enabled 0 >/dev/null 2>&1;"
+                      "settings put secure touch_exploration_enabled 0 >/dev/null 2>&1;"
+                      "settings put global tran_aim_assist_enhance 1 >/dev/null 2>&1;"
+                      "setprop debug.sf.early_phase_offset_ns 0 >/dev/null 2>&1;"
+                      "setprop debug.sf.early_app_phase_offset_ns 0 >/dev/null 2>&1;"
+                      "setprop debug.sf.early_gl_phase_offset_ns 0 >/dev/null 2>&1;"
+                      "setprop debug.sf.high_fps_early_phase_offset_ns 0 >/dev/null 2>&1;"
+                      "setprop debug.sf.high_fps_late_app_phase_offset_ns 0 >/dev/null 2>&1;"
+                      "setprop debug.hwui.use_hint_manager 1 >/dev/null 2>&1;",
+                      strat
+                  );
+                  system(cmd);
+              }
+
+              // 3. Kunci Smooth Aim (120Hz SurfaceFlinger & Zero Frame Backpressure)
+              if (featSmoothAim) {
+                  system(
+                      "service call SurfaceFlinger 1035 i32 0 >/dev/null 2>&1;"
+                      "settings put system peak_refresh_rate 120.0 >/dev/null 2>&1;"
+                      "settings put system min_refresh_rate 120.0 >/dev/null 2>&1;"
+                      "settings put secure user_refresh_rate 120 >/dev/null 2>&1;"
+                      "settings put global tran_refresh_rate_mode 120 >/dev/null 2>&1;"
+                      "setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1;"
+                      "setprop debug.sf.auto_latch_unsignaled 1 >/dev/null 2>&1;"
+                      "setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1;"
+                      "setprop debug.egl.swapinterval 0 >/dev/null 2>&1;"
+                      "settings put global window_animation_scale 0.0 >/dev/null 2>&1;"
+                      "settings put global transition_animation_scale 0.0 >/dev/null 2>&1;"
+                      "settings put global animator_duration_scale 0.0 >/dev/null 2>&1;"
+                  );
+              }
+
+              // 4. Kunci Aim Legit (Performa Penuh CPU/GPU & Bebas Thermal Limit Saat War)
+              if (featAimLegit || featAimbot || featAim) {
+                  system(
+                      "cmd power set-fixed-performance-mode-enabled true >/dev/null 2>&1;"
+                      "cmd thermalservice override-status 0 >/dev/null 2>&1;"
+                      "cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1;"
+                      "cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1;"
+                      "am set-standby-bucket com.dts.freefireth active >/dev/null 2>&1;"
+                      "am set-standby-bucket com.dts.freefiremax active >/dev/null 2>&1;"
+                  );
+              }
+
+              // 5. Aktifkan langsung node hardware touchpanel kernel
+              write_node("/proc/touchpanel/game_switch_enable", "1");
+              write_node("/proc/touchpanel/oplus_tp_limit_enable", "0");
+              write_node("/sys/class/touch/touch_dev/bump_sample_rate", "1");
+              write_node("/sys/class/touch/touch_dev/palm_sensor", "0");
+              write_node("/proc/perfmgr/tchbst/user/usrtch", "1");
           }
 
           int main(int argc, char** argv) {
-              if (argc < 5) return 0;
-              int mask       = atoi(argv[1]);
-              int target_dpi = atoi(argv[2]);
-              int force_now  = atoi(argv[3]);
-              const char* strategy = argv[4];
+              // WAJIB: Setel PATH sistem secara eksplisit agar semua perintah di dalam daemon C++ 100% berjalan!
+              setenv("PATH", "/system/bin:/system/xbin:/product/bin:/apex/com.android.runtime/bin:/vendor/bin", 1);
 
-              // Hentikan daemon lama jika ada
+              if (argc < 3) return 0;
+              int mask  = atoi(argv[1]);
+              int sensi = atoi(argv[2]);
+
               FILE* fp = fopen("/data/local/tmp/danz_ff_injector.pid", "r");
               if (fp) {
                   int old_pid = 0;
@@ -192,8 +257,6 @@ jobs:
               }
 
               if (mask == 0) {
-                  system("wm density reset >/dev/null 2>&1");
-                  system("wm size reset >/dev/null 2>&1");
                   unlink("/data/local/tmp/danz_ff_injector.pid");
                   return 0;
               }
@@ -213,59 +276,19 @@ jobs:
                   if (null_fd > 2) close(null_fd);
               }
 
+              write_node("/proc/self/oom_score_adj", "-1000");
+              setpriority(PRIO_PROCESS, 0, -20);
+
               FILE* out_fp = fopen("/data/local/tmp/danz_ff_injector.pid", "w");
               if (out_fp) {
                   fprintf(out_fp, "%d\n", getpid());
                   fclose(out_fp);
               }
 
-              int state_applied = 0;
-              char cmd[512];
-
-              // Jika ditekan langsung dari Panel Melayang [DZ] di dalam game, langsung suntikkan detik itu juga!
-              if (force_now == 1 && target_dpi > 120) {
-                  snprintf(cmd, sizeof(cmd), "wm density %d >/dev/null 2>&1", target_dpi);
-                  system(cmd);
-                  state_applied = 1;
-              }
-
-              int tick = 0;
+              // Jalankan loop penjaga in-game setiap 1.5 detik tanpa henti selama fitur aktif
               while (true) {
-                  int in_ff = is_freefire_in_foreground();
-
-                  if (in_ff) {
-                      if (!state_applied && target_dpi > 120) {
-                          snprintf(cmd, sizeof(cmd), "wm density %d >/dev/null 2>&1", target_dpi);
-                          system(cmd);
-                          state_applied = 1;
-                      }
-                      // Pastikan sensor touchpanel tetap dalam mode respons tertinggi selama di dalam Free Fire
-                      write_node("/proc/touchpanel/game_switch_enable", "1");
-                      write_node("/proc/touchpanel/oplus_tp_limit_enable", "0");
-                      write_node("/sys/class/touch/touch_dev/bump_sample_rate", "1");
-                      write_node("/sys/class/touch/touch_dev/palm_sensor", "0");
-
-                      if (tick >= 12) { // Setiap 3 detik kunci ulang strategi VelocityTracker agar tidak di-reset XArena
-                          tick = 0;
-                          snprintf(cmd, sizeof(cmd),
-                              "device_config put input_native_boot velocitytracker_strategy %s >/dev/null 2>&1;"
-                              "device_config put input_native_boot resample_touch false >/dev/null 2>&1;"
-                              "settings put system pointer_speed 7 >/dev/null 2>&1;"
-                              "settings put secure touch_slop 0 >/dev/null 2>&1;",
-                              strategy
-                          );
-                          system(cmd);
-                      }
-                  } else {
-                      // Begitu pemain keluar dari Free Fire (ke Home Screen / aplikasi lain), langsung kembalikan layar HP ke normal!
-                      if (state_applied) {
-                          system("wm density reset >/dev/null 2>&1");
-                          state_applied = 0;
-                      }
-                  }
-
-                  tick++;
-                  usleep(250000); // Cek setiap 250ms (0.25 detik)
+                  enforce_ingame_hooks(mask, sensi);
+                  usleep(1500000); // 1.5 detik
               }
               return 0;
           }
@@ -285,7 +308,7 @@ jobs:
           # 3. CMakeLists.txt
           cat << 'EOF' > clean_apk/app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.18.1)
-          project("danz_v31_engine")
+          project("danz_v32_engine")
 
           add_library(danz_engine SHARED danz_engine.cpp)
           target_link_libraries(danz_engine log android)
@@ -328,7 +351,7 @@ jobs:
           EOF
 
           # 4. Mesin Utama JNI C++ (libdanz_engine.so):
-          #    Menghitung Kontribusi Nyata Masing-Masing Fitur (1-8) terhadap Matriks Koordinat In-Game & InputReader
+          #    Menyuntikkan Matriks Koordinat Khusus Paket Free Fire (Tanpa Mengubah DPI HP) + Menjalankan Daemon C++
           cat << 'EOF' > clean_apk/app/src/main/cpp/danz_engine.cpp
           #include <jni.h>
           #include <string>
@@ -342,8 +365,6 @@ jobs:
                   jclass clazz,
                   jint mask,
                   jint sensiLevel,
-                  jint baseDensity,
-                  jboolean isLiveInGameTrigger,
                   jstring jNativeDir) {
 
               const char* cNativeDir = env->GetStringUTFChars(jNativeDir, nullptr);
@@ -362,13 +383,13 @@ jobs:
               std::ostringstream cmd;
               std::string srcBin = nativeDir + "/libdanz_daemon_bin.so";
 
-              cmd << "appops set com.danzstraight.mod SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1\n";
-              cmd << "cmd appops set com.danzstraight.mod SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1\n";
+              // Pastikan resolusi & DPI layar HP 100% normal (tidak mengubah tampilan HP di luar game)
+              cmd << "wm size reset >/dev/null 2>&1\n";
+              cmd << "wm density reset >/dev/null 2>&1\n";
               cmd << "pkill -9 -f danz_ff_injector >/dev/null 2>&1\n";
+              cmd << "pkill -9 -f danz_injector >/dev/null 2>&1\n";
 
               if (mask == 0) {
-                  cmd << "wm density reset >/dev/null 2>&1\n";
-                  cmd << "wm size reset >/dev/null 2>&1\n";
                   cmd << "rm -f /data/local/tmp/danz_ff_injector /data/local/tmp/danz_ff_injector.pid >/dev/null 2>&1\n";
                   cmd << "device_config set_sync_disabled_for_tests none >/dev/null 2>&1\n";
                   cmd << "device_config delete game_overlay com.dts.freefireth >/dev/null 2>&1\n";
@@ -380,136 +401,58 @@ jobs:
 
               cmd << "device_config set_sync_disabled_for_tests persistent >/dev/null 2>&1\n";
 
-              // 1. HITUNG TARGET MATRIKS KOORDINAT IN-GAME FREE FIRE (Setiap fitur punya kontribusi nyata!)
-              //    Semakin tinggi pengurangan density internal saat Free Fire aktif di layar,
-              //    semakin tinggi Lebar Minimum (DP) yang dibaca oleh Unity Free Fire (hingga ~920 DP!),
-              //    membuat geseran kamera licin parah & tarikan drag vertikal ke kepala menjadi sangat ringan!
-              int stockDpi = (baseDensity > 160) ? baseDensity : 440;
-              int dpiReductionPct = 0;
-
+              // 1. Hitung Rasio Koordinat Internal Khusus Paket Free Fire (Mempercepat Geseran Kamera & Drag Kepala di FF)
+              //    Semakin kecil nilai ffScale (0.70 - 0.88), semakin rapat koordinat piksel internal Unity Free Fire
+              //    sehingga geseran jari sedikit saja langsung licin & tarikan peluru cepat naik ke kepala!
+              int scalePct = 92;
               if (featSensivity) {
-                  // Level 1 = -12%, Level 4 = -24%, Level 7 = -36% (Meningkatkan DP Free Fire dari 360dp ke ~580dp)
-                  dpiReductionPct += (6 + (sensiLevel * 4));
+                  scalePct -= (sensiLevel * 2); // Level 7 = -14%
               }
-              if (featAimbot)   dpiReductionPct += 5; // Tambahan akselerasi vektor kepala
-              if (featAim)      dpiReductionPct += 3; // Respon awal tembakan
-              if (featAimLock)  dpiReductionPct += 4; // Presisi penguncian leher/kepala
-              if (featAimDrag)  dpiReductionPct += 6; // Daya angkat vertikal SG/SMG ke kepala
-              if (featEasyDrag) dpiReductionPct += 4; // Meringankan beban geser tombol tembak
+              if (featAimbot)   scalePct -= 2;
+              if (featAim)      scalePct -= 1;
+              if (featAimLock)  scalePct -= 2;
+              if (featAimDrag)  scalePct -= 3;
+              if (featEasyDrag) scalePct -= 2;
 
-              if (dpiReductionPct > 52) dpiReductionPct = 52; // Batas aman (~780 - 920 DP di dalam Free Fire)
+              if (scalePct < 70) scalePct = 70;
+              if (scalePct > 90) scalePct = 90;
 
-              int targetFFDensity = (dpiReductionPct > 0)
-                  ? (stockDpi * (100 - dpiReductionPct) / 100)
-                  : 0;
-              if (targetFFDensity > 0 && targetFFDensity < 180) targetFFDensity = 180;
+              std::string factorStr = (scalePct % 10 == 0)
+                  ? ("0." + std::to_string(scalePct / 10))
+                  : ("0." + std::to_string(scalePct));
 
-              // 2. PILIH ALGORITMA VELOCITYTRACKER AOSP NYATA SESUAI FITUR AIM YANG DIAKTIFKAN
-              //    - Aim Lock aktif (tanpa Aim Drag) -> 'lsq1' (1st-order linear: berhenti tepat di kepala tanpa lewat atas kepala)
-              //    - Aimbot aktif (tanpa Aim Drag)   -> 'int1' (1st-order integrating: menempel di target bergerak)
-              //    - Aim Drag aktif                  -> 'impulse' (lonjakan kecepatan awal ke atas untuk drag pendek SG2/MP40)
-              std::string trackerStrategy = "impulse";
-              if (featAimLock && !featAimDrag) {
-                  trackerStrategy = "lsq1";
-              } else if (featAimbot && !featAimDrag && !featAimLock) {
-                  trackerStrategy = "int1";
-              }
+              std::string overlayRule = "mode=2,downscaleFactor=" + factorStr + ",fps=120,loadingBoost=999999999:mode=3,downscaleFactor=" + factorStr + ",fps=120,loadingBoost=999999999";
 
-              cmd << "device_config put input_native_boot velocitytracker_strategy " << trackerStrategy << " >/dev/null 2>&1\n";
-              cmd << "device_config put input_native_boot resample_touch false >/dev/null 2>&1\n";
-              cmd << "device_config put input_native_boot slow_event_min_reporting_latency_millis 0 >/dev/null 2>&1\n";
+              // Terapkan game_overlay khusus ke paket Free Fire.
+              // PROTEKSI ANTI-MENTAL: Hanya panggil 'cmd game set' jika Free Fire sedang TIDAK berjalan agar tidak me-restart game di tengah pertandingan!
+              cmd << "device_config put game_overlay com.dts.freefireth " << overlayRule << " >/dev/null 2>&1\n";
+              cmd << "device_config put game_overlay com.dts.freefiremax " << overlayRule << " >/dev/null 2>&1\n";
+              cmd << "if ! dumpsys activity top 2>/dev/null | grep -q 'com.dts.freefire'; then\n"
+                  << "  cmd game set --mode 2 --downscale " << factorStr << " --fps 120 com.dts.freefireth >/dev/null 2>&1\n"
+                  << "  cmd game set --mode 2 --downscale " << factorStr << " --fps 120 com.dts.freefiremax >/dev/null 2>&1\n"
+                  << "fi\n";
 
-              // 3. KONFIGURASI MASING-MASING FITUR KE SISTEM ANDROID & PAKET FREE FIRE
-              if (featEasyDrag || featAimDrag || featAimbot) {
-                  cmd << "device_config put input_native_boot deep_press_enabled false >/dev/null 2>&1\n";
-                  cmd << "device_config put input_native_boot palm_rejection_enabled false >/dev/null 2>&1\n";
-                  cmd << "settings put global touch_slop 0 >/dev/null 2>&1\n";
-                  cmd << "settings put secure touch_slop 0 >/dev/null 2>&1\n";
-                  cmd << "settings put system touch_slop 0 >/dev/null 2>&1\n";
-                  cmd << "settings put system high_touch_sensitivity_enable 1 >/dev/null 2>&1\n";
-                  cmd << "settings put system glove_mode 1 >/dev/null 2>&1\n";
-                  cmd << "settings put secure glove_mode_enabled 1 >/dev/null 2>&1\n";
+              // 2. Kompilasi Speed-Profile pada Paket Free Fire agar Eksekusi Senjata & Input Bebas Jitter
+              if (featAimbot || featAim || featAimLock || featAimDrag || featEasyDrag) {
+                  cmd << "cmd package compile -m speed-profile -f com.dts.freefireth >/dev/null 2>&1 &\n";
+                  cmd << "cmd package compile -m speed-profile -f com.dts.freefiremax >/dev/null 2>&1 &\n";
               }
 
-              if (featAim || featAimbot || featAimLock) {
-                  cmd << "settings put secure tap_duration_threshold 0.0 >/dev/null 2>&1\n";
-                  cmd << "settings put system touch_blocking_period 0.0 >/dev/null 2>&1\n";
-                  cmd << "settings put global touch_blocking_period 0.0 >/dev/null 2>&1\n";
-                  cmd << "settings put secure long_press_timeout 100 >/dev/null 2>&1\n";
-                  cmd << "settings put secure multi_press_timeout 100 >/dev/null 2>&1\n";
-                  cmd << "settings put global tran_aim_assist_enhance 1 >/dev/null 2>&1\n";
-              }
-
-              if (featSensivity) {
-                  int gSensi = (sensiLevel >= 7) ? 100 : (sensiLevel * 14);
-                  int pollHz = (sensiLevel >= 7) ? 360 : (180 + (sensiLevel * 25));
-                  cmd << "settings put global pointer_speed 7 >/dev/null 2>&1\n";
-                  cmd << "settings put system pointer_speed 7 >/dev/null 2>&1\n";
-                  cmd << "settings put secure pointer_speed 7 >/dev/null 2>&1\n";
-                  cmd << "settings put system pointer_acceleration 1 >/dev/null 2>&1\n";
-                  cmd << "settings put global touch_sampling_rate " << pollHz << " >/dev/null 2>&1\n";
-                  cmd << "settings put global game_touch_sampling_rate " << pollHz << " >/dev/null 2>&1\n";
-                  cmd << "settings put global tran_touch_sampling_rate " << pollHz << " >/dev/null 2>&1\n";
-                  cmd << "settings put global game_space_touch_sensitivity " << gSensi << " >/dev/null 2>&1\n";
-                  cmd << "settings put global game_space_swipe_sensitivity " << gSensi << " >/dev/null 2>&1\n";
-                  cmd << "settings put global tran_game_touch_sensitivity " << gSensi << " >/dev/null 2>&1\n";
-                  cmd << "settings put global tran_game_swipe_sensitivity " << gSensi << " >/dev/null 2>&1\n";
-                  cmd << "settings put system tran_game_touch_sensitivity " << gSensi << " >/dev/null 2>&1\n";
-                  cmd << "settings put system tran_game_swipe_sensitivity " << gSensi << " >/dev/null 2>&1\n";
-                  cmd << "settings put system touch_game_mode 1 >/dev/null 2>&1\n";
-                  cmd << "settings put system game_mode_touch_sensitivity 3 >/dev/null 2>&1\n";
-              }
-
-              if (featSmoothAim) {
-                  cmd << "service call SurfaceFlinger 1035 i32 0 >/dev/null 2>&1\n";
-                  cmd << "settings put system peak_refresh_rate 120.0 >/dev/null 2>&1\n";
-                  cmd << "settings put system min_refresh_rate 120.0 >/dev/null 2>&1\n";
-                  cmd << "settings put global tran_refresh_rate_mode 120 >/dev/null 2>&1\n";
-                  cmd << "setprop debug.sf.latch_unsignaled 1 >/dev/null 2>&1\n";
-                  cmd << "setprop debug.sf.auto_latch_unsignaled 1 >/dev/null 2>&1\n";
-                  cmd << "setprop debug.sf.disable_backpressure 1 >/dev/null 2>&1\n";
-                  cmd << "setprop debug.egl.swapinterval 0 >/dev/null 2>&1\n";
-                  cmd << "setprop debug.sf.early_phase_offset_ns 0 >/dev/null 2>&1\n";
-                  cmd << "setprop debug.sf.early_app_phase_offset_ns 0 >/dev/null 2>&1\n";
-                  cmd << "settings put global window_animation_scale 0.0 >/dev/null 2>&1\n";
-                  cmd << "settings put global transition_animation_scale 0.0 >/dev/null 2>&1\n";
-                  cmd << "settings put global animator_duration_scale 0.0 >/dev/null 2>&1\n";
-              }
-
-              if (featAimLegit || featAimbot || featAim) {
-                  // Aktifkan GameManager Performance Mode & Render Scaling Khusus Paket Free Fire
-                  std::string ffScale = featSensivity ? ((sensiLevel >= 7) ? "0.80" : "0.85") : "0.90";
-                  std::string overlayRule = "mode=2,downscaleFactor=" + ffScale + ",fps=120,loadingBoost=999999999:mode=3,downscaleFactor=" + ffScale + ",fps=120,loadingBoost=999999999";
-                  cmd << "device_config put game_overlay com.dts.freefireth " << overlayRule << " >/dev/null 2>&1\n";
-                  cmd << "device_config put game_overlay com.dts.freefiremax " << overlayRule << " >/dev/null 2>&1\n";
-                  cmd << "cmd game mode 2 com.dts.freefireth >/dev/null 2>&1\n";
-                  cmd << "cmd game mode 2 com.dts.freefiremax >/dev/null 2>&1\n";
-                  cmd << "cmd power set-fixed-performance-mode-enabled true >/dev/null 2>&1\n";
-                  cmd << "cmd thermalservice override-status 0 >/dev/null 2>&1\n";
-                  cmd << "cmd deviceidle whitelist +com.dts.freefireth >/dev/null 2>&1\n";
-                  cmd << "cmd deviceidle whitelist +com.dts.freefiremax >/dev/null 2>&1\n";
-                  cmd << "am set-standby-bucket com.dts.freefireth active >/dev/null 2>&1\n";
-                  cmd << "am set-standby-bucket com.dts.freefiremax active >/dev/null 2>&1\n";
-              }
-
-              // 4. JALANKAN BINER C++ /data/local/tmp/danz_ff_injector
-              //    (Otomatis menyuntikkan targetFFDensity HANYA saat Free Fire berada di layar depan, dan me-reset saat keluar FF!)
-              int forceFlag = isLiveInGameTrigger ? 1 : 0;
+              // 3. Salin & Jalankan Biner Daemon C++ (/data/local/tmp/danz_ff_injector)
+              //    Daemon ini langsung mengunci seluruh pengaturan Aim & Sensivity setiap 1.5 detik selama bermain!
               cmd << "cp -f " << srcBin << " /data/local/tmp/danz_ff_injector >/dev/null 2>&1\n";
               cmd << "chmod 755 /data/local/tmp/danz_ff_injector >/dev/null 2>&1\n";
               cmd << "chcon u:object_r:shell_data_file:s0 /data/local/tmp/danz_ff_injector >/dev/null 2>&1\n";
-              cmd << "/data/local/tmp/danz_ff_injector " << mask << " " << targetFFDensity << " " << forceFlag << " " << trackerStrategy << " </dev/null >/dev/null 2>&1 &\n";
+              cmd << "/data/local/tmp/danz_ff_injector " << mask << " " << sensiLevel << " </dev/null >/dev/null 2>&1 &\n";
 
               return env->NewStringUTF(cmd.str().c_str());
           }
           EOF
 
-          # 5. AndroidManifest.xml
+          # 5. AndroidManifest.xml Bersih (Tanpa Service Panel Melayang)
           cat << 'EOF' > clean_apk/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <queries>
                   <package android:name="moe.shizuku.privileged.api" />
                   <package android:name="com.dts.freefireth" />
@@ -530,10 +473,6 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-                  <service
-                      android:name=".FloatingModService"
-                      android:enabled="true"
-                      android:exported="false" />
                   <provider
                       android:name="rikka.shizuku.ShizukuProvider"
                       android:authorities="${applicationId}.shizuku"
@@ -545,370 +484,7 @@ jobs:
           </manifest>
           EOF
 
-          # 6. FloatingModService.java: Ukuran Panel Terkunci Menggunakan Piksel Fisik (Tidak Ikut Mengecil Saat Matriks FF Aktif!)
-          cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/FloatingModService.java
-          package com.danzstraight.mod;
-
-          import android.app.Service;
-          import android.content.Intent;
-          import android.content.res.Configuration;
-          import android.graphics.Color;
-          import android.graphics.PixelFormat;
-          import android.graphics.Typeface;
-          import android.graphics.drawable.GradientDrawable;
-          import android.os.Build;
-          import android.os.IBinder;
-          import android.util.DisplayMetrics;
-          import android.util.TypedValue;
-          import android.view.Gravity;
-          import android.view.MotionEvent;
-          import android.view.View;
-          import android.view.WindowManager;
-          import android.widget.Button;
-          import android.widget.CheckBox;
-          import android.widget.LinearLayout;
-          import android.widget.ScrollView;
-          import android.widget.SeekBar;
-          import android.widget.TextView;
-          import android.widget.Toast;
-
-          public class FloatingModService extends Service {
-              private WindowManager wm;
-              private LinearLayout rootContainer;
-              private TextView floatingBubble;
-              private TextView stealthDot;
-              private LinearLayout menuPanel;
-              private TextView liveTelemetryTxt;
-              private WindowManager.LayoutParams params;
-              private float fixedScale;
-
-              @Override
-              public IBinder onBind(Intent intent) {
-                  return null;
-              }
-
-              // Menggunakan lebar piksel fisik layar yang TIDAK pernah berubah walaupun DPI in-game diubah!
-              private int px(int dpVal) {
-                  return Math.round(dpVal * fixedScale);
-              }
-
-              @Override
-              public void onCreate() {
-                  super.onCreate();
-                  wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-                  DisplayMetrics dm = new DisplayMetrics();
-                  wm.getDefaultDisplay().getRealMetrics(dm);
-                  int minSide = Math.min(dm.widthPixels, dm.heightPixels);
-                  fixedScale = minSide / 360f;
-
-                  int layoutFlag = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                      ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                      : WindowManager.LayoutParams.TYPE_PHONE;
-
-                  params = new WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      layoutFlag,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                      PixelFormat.TRANSLUCENT
-                  );
-                  params.gravity = Gravity.TOP | Gravity.START;
-                  params.x = px(16);
-                  params.y = px(85);
-
-                  buildFloatingUI();
-
-                  try {
-                      wm.addView(rootContainer, params);
-                  } catch (Throwable e) {
-                      Toast.makeText(this, "Gagal membuka Panel: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              @Override
-              public void onConfigurationChanged(Configuration newConfig) {
-                  super.onConfigurationChanged(newConfig);
-                  // Mencegah panel berubah ukuran saat matriks DPI Free Fire diaktifkan
-              }
-
-              private void updateTelemetryLabel() {
-                  if (liveTelemetryTxt == null) return;
-                  int effDp = MainActivity.calculateEffectiveFFDp();
-                  String strat = (MainActivity.featAimLock && !MainActivity.featAimDrag)
-                      ? "LSQ1 (Lock Kepala)"
-                      : (MainActivity.featAimDrag ? "IMPULSE (Drag Cepat)" : "INT1 (Aimbot)");
-                  liveTelemetryTxt.setText("Sistem FF: " + effDp + " DP | Kurva: " + strat);
-              }
-
-              private void buildFloatingUI() {
-                  rootContainer = new LinearLayout(this);
-                  rootContainer.setOrientation(LinearLayout.VERTICAL);
-
-                  // 1. Ikon Melayang [DZ]
-                  floatingBubble = new TextView(this);
-                  floatingBubble.setText("DZ");
-                  floatingBubble.setTextColor(Color.parseColor("#00E5FF"));
-                  floatingBubble.setTypeface(Typeface.DEFAULT_BOLD);
-                  floatingBubble.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(14));
-                  floatingBubble.setGravity(Gravity.CENTER);
-                  floatingBubble.setWidth(px(46));
-                  floatingBubble.setHeight(px(46));
-                  GradientDrawable bubbleBg = new GradientDrawable();
-                  bubbleBg.setColor(Color.parseColor("#E60B0E14"));
-                  bubbleBg.setCornerRadius(px(23));
-                  bubbleBg.setStroke(px(2), Color.parseColor("#00E5FF"));
-                  floatingBubble.setBackground(bubbleBg);
-
-                  // 2. Titik Mode HIDE (Stealth)
-                  stealthDot = new TextView(this);
-                  stealthDot.setText("•");
-                  stealthDot.setTextColor(Color.parseColor("#4000E5FF"));
-                  stealthDot.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(18));
-                  stealthDot.setGravity(Gravity.CENTER);
-                  stealthDot.setWidth(px(28));
-                  stealthDot.setHeight(px(28));
-                  GradientDrawable dotBg = new GradientDrawable();
-                  dotBg.setColor(Color.parseColor("#18000000"));
-                  dotBg.setCornerRadius(px(14));
-                  stealthDot.setBackground(dotBg);
-                  stealthDot.setVisibility(View.GONE);
-
-                  // 3. Panel Menu Utama In-Game
-                  menuPanel = new LinearLayout(this);
-                  menuPanel.setOrientation(LinearLayout.VERTICAL);
-                  menuPanel.setPadding(px(12), px(10), px(12), px(12));
-                  GradientDrawable panelBg = new GradientDrawable();
-                  panelBg.setColor(Color.parseColor("#F20D121A"));
-                  panelBg.setCornerRadius(px(14));
-                  panelBg.setStroke(px(1), Color.parseColor("#00E5FF"));
-                  menuPanel.setBackground(panelBg);
-                  menuPanel.setVisibility(View.GONE);
-
-                  // Header Panel
-                  LinearLayout header = new LinearLayout(this);
-                  header.setOrientation(LinearLayout.HORIZONTAL);
-                  header.setGravity(Gravity.CENTER_VERTICAL);
-
-                  TextView title = new TextView(this);
-                  title.setText("DANZ V31 LIVE FF");
-                  title.setTextColor(Color.parseColor("#00E5FF"));
-                  title.setTypeface(Typeface.DEFAULT_BOLD);
-                  title.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(12));
-                  LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-                  header.addView(title, titleLp);
-
-                  Button btnHide = makeSmallTopButton("HIDE", "#1B2A38", "#8CE0FF");
-                  btnHide.setOnClickListener(v -> {
-                      menuPanel.setVisibility(View.GONE);
-                      floatingBubble.setVisibility(View.GONE);
-                      stealthDot.setVisibility(View.VISIBLE);
-                      params.x = 0;
-                      params.y = px(36);
-                      try { wm.updateViewLayout(rootContainer, params); } catch (Exception ignored) {}
-                      Toast.makeText(FloatingModService.this, "Mode HIDE Aktif! Ketuk titik tipis di kiri atas untuk membuka lagi.", Toast.LENGTH_SHORT).show();
-                  });
-
-                  Button btnMin = makeSmallTopButton(" - ", "#1A212E", "#FFFFFF");
-                  btnMin.setOnClickListener(v -> {
-                      menuPanel.setVisibility(View.GONE);
-                      stealthDot.setVisibility(View.GONE);
-                      floatingBubble.setVisibility(View.VISIBLE);
-                  });
-
-                  Button btnClose = makeSmallTopButton(" X ", "#3A1518", "#FF6B6B");
-                  btnClose.setOnClickListener(v -> stopSelf());
-
-                  header.addView(btnHide);
-                  header.addView(btnMin);
-                  header.addView(btnClose);
-                  menuPanel.addView(header);
-
-                  // Baris Telemetry Live (Menampilkan DP Aktif & Kurva Aim di Sistem FF)
-                  liveTelemetryTxt = new TextView(this);
-                  liveTelemetryTxt.setTextColor(Color.parseColor("#00E676"));
-                  liveTelemetryTxt.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(10));
-                  liveTelemetryTxt.setPadding(0, px(4), 0, px(2));
-                  updateTelemetryLabel();
-                  menuPanel.addView(liveTelemetryTxt);
-
-                  // Tombol Utama: INJECT KE SISTEM FF SEKARANG (LIVE)
-                  Button btnLiveInject = new Button(this);
-                  btnLiveInject.setText("⚡ INJECT KE SISTEM FF (LIVE)");
-                  btnLiveInject.setAllCaps(false);
-                  btnLiveInject.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(11));
-                  btnLiveInject.setTypeface(Typeface.DEFAULT_BOLD);
-                  btnLiveInject.setTextColor(Color.parseColor("#04141C"));
-                  GradientDrawable injBg = new GradientDrawable();
-                  injBg.setColor(Color.parseColor("#00E676"));
-                  injBg.setCornerRadius(px(8));
-                  btnLiveInject.setBackground(injBg);
-                  LinearLayout.LayoutParams injLp = new LinearLayout.LayoutParams(px(220), px(34));
-                  injLp.topMargin = px(4);
-                  injLp.bottomMargin = px(6);
-                  btnLiveInject.setOnClickListener(v -> {
-                      updateTelemetryLabel();
-                      int effDp = MainActivity.calculateEffectiveFFDp();
-                      MainActivity.triggerLiveInGameInjection(
-                          FloatingModService.this,
-                          true,
-                          "Sistem FF Terinjeksi Live (" + effDp + " DP + Lock Kepala)! Layar otomatis kembali normal saat keluar FF."
-                      );
-                  });
-                  menuPanel.addView(btnLiveInject, injLp);
-
-                  // Daftar 8 Fitur Live
-                  ScrollView scroll = new ScrollView(this);
-                  LinearLayout list = new LinearLayout(this);
-                  list.setOrientation(LinearLayout.VERTICAL);
-
-                  list.addView(makeFeatureSwitch("Aimbot", 8));
-                  list.addView(makeFeatureSwitch("Aim", 1));
-                  list.addView(makeFeatureSwitch("Aim Lock", 7));
-                  list.addView(makeFeatureSwitch("Aim Drag", 6));
-                  list.addView(makeFeatureSwitch("Easy Drag", 2));
-                  list.addView(makeFeatureSwitch("Smooth Aim", 3));
-                  list.addView(makeFeatureSwitch("Aim Legit", 4));
-                  list.addView(makeFeatureSwitch("Sensivity", 5));
-
-                  TextView sensiLbl = new TextView(this);
-                  sensiLbl.setText("Level Sensivity: " + MainActivity.sensiLevel + " (MAX LICIN)");
-                  sensiLbl.setTextColor(Color.parseColor("#8CE0FF"));
-                  sensiLbl.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(11));
-                  sensiLbl.setPadding(px(4), px(4), px(4), px(2));
-                  list.addView(sensiLbl);
-
-                  SeekBar seek = new SeekBar(this);
-                  seek.setMax(6);
-                  seek.setProgress(Math.max(0, MainActivity.sensiLevel - 1));
-                  seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                      @Override
-                      public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                          int lvl = progress + 1;
-                          MainActivity.sensiLevel = lvl;
-                          sensiLbl.setText("Level Sensivity: " + lvl + (lvl == 7 ? " (MAX LICIN)" : ""));
-                          updateTelemetryLabel();
-                      }
-                      @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-                      @Override
-                      public void onStopTrackingTouch(SeekBar seekBar) {
-                          MainActivity.featSensivity = true;
-                          updateTelemetryLabel();
-                          MainActivity.triggerLiveInGameInjection(
-                              FloatingModService.this,
-                              true,
-                              "Sensivity In-Game Lv." + MainActivity.sensiLevel + " (" + MainActivity.calculateEffectiveFFDp() + " DP) Aktif!"
-                          );
-                      }
-                  });
-                  list.addView(seek);
-
-                  scroll.addView(list);
-                  LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(px(220), px(200));
-                  menuPanel.addView(scroll, scrollLp);
-
-                  rootContainer.addView(floatingBubble);
-                  rootContainer.addView(stealthDot);
-                  rootContainer.addView(menuPanel);
-
-                  setupDragAndClick(floatingBubble, () -> {
-                      updateTelemetryLabel();
-                      floatingBubble.setVisibility(View.GONE);
-                      stealthDot.setVisibility(View.GONE);
-                      menuPanel.setVisibility(View.VISIBLE);
-                  });
-
-                  setupDragAndClick(stealthDot, () -> {
-                      updateTelemetryLabel();
-                      stealthDot.setVisibility(View.GONE);
-                      floatingBubble.setVisibility(View.GONE);
-                      menuPanel.setVisibility(View.VISIBLE);
-                  });
-
-                  setupDragAndClick(header, null);
-              }
-
-              private Button makeSmallTopButton(String txt, String bgHex, String fgHex) {
-                  Button b = new Button(this);
-                  b.setText(txt);
-                  b.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(10));
-                  b.setAllCaps(false);
-                  b.setTextColor(Color.parseColor(fgHex));
-                  b.setPadding(px(4), 0, px(4), 0);
-                  GradientDrawable gd = new GradientDrawable();
-                  gd.setColor(Color.parseColor(bgHex));
-                  gd.setCornerRadius(px(6));
-                  b.setBackground(gd);
-                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(38), px(26));
-                  lp.leftMargin = px(4);
-                  b.setLayoutParams(lp);
-                  return b;
-              }
-
-              private CheckBox makeFeatureSwitch(String name, int id) {
-                  CheckBox cb = new CheckBox(this);
-                  cb.setText(name);
-                  cb.setTextColor(Color.WHITE);
-                  cb.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(12));
-                  cb.setTypeface(Typeface.DEFAULT_BOLD);
-                  cb.setChecked(MainActivity.getFeatureState(id));
-                  cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                      MainActivity.setFeatureState(id, isChecked);
-                      updateTelemetryLabel();
-                      MainActivity.triggerLiveInGameInjection(
-                          FloatingModService.this,
-                          true,
-                          name + (isChecked ? " Aktif di Sistem FF (" + MainActivity.calculateEffectiveFFDp() + " DP)!" : " Nonaktif")
-                      );
-                  });
-                  return cb;
-              }
-
-              private void setupDragAndClick(View target, Runnable onClickAction) {
-                  target.setOnTouchListener(new View.OnTouchListener() {
-                      private int initX, initY;
-                      private float touchX, touchY;
-                      private boolean moved = false;
-
-                      @Override
-                      public boolean onTouch(View v, MotionEvent e) {
-                          switch (e.getAction()) {
-                              case MotionEvent.ACTION_DOWN:
-                                  initX = params.x;
-                                  initY = params.y;
-                                  touchX = e.getRawX();
-                                  touchY = e.getRawY();
-                                  moved = false;
-                                  return true;
-                              case MotionEvent.ACTION_MOVE:
-                                  int dx = (int) (e.getRawX() - touchX);
-                                  int dy = (int) (e.getRawY() - touchY);
-                                  if (Math.abs(dx) > 8 || Math.abs(dy) > 8) moved = true;
-                                  params.x = initX + dx;
-                                  params.y = initY + dy;
-                                  try { wm.updateViewLayout(rootContainer, params); } catch (Exception ignored) {}
-                                  return true;
-                              case MotionEvent.ACTION_UP:
-                                  if (!moved && onClickAction != null) {
-                                      onClickAction.run();
-                                  }
-                                  return true;
-                          }
-                          return false;
-                      }
-                  });
-              }
-
-              @Override
-              public void onDestroy() {
-                  super.onDestroy();
-                  if (wm != null && rootContainer != null) {
-                      try { wm.removeView(rootContainer); } catch (Exception ignored) {}
-                  }
-              }
-          }
-          EOF
-
-          # 7. MainActivity V31: Menghitung Base Density Asli HP & Mengontrol In-Game Auto-Injector
+          # 6. MainActivity V32: Bersih Tanpa Panel Overlay & Tanpa File Headshot Gimmick
           cat << 'EOF' > clean_apk/app/src/main/java/com/danzstraight/mod/MainActivity.java
           package com.danzstraight.mod;
           import androidx.appcompat.app.AppCompatActivity;
@@ -917,15 +493,11 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.content.pm.PackageManager;
-          import android.content.res.Configuration;
           import android.graphics.Color;
-          import android.net.Uri;
-          import android.os.Build;
           import android.os.Bundle;
           import android.os.Handler;
           import android.os.Looper;
           import android.provider.Settings;
-          import android.util.DisplayMetrics;
           import android.view.Window;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebSettings;
@@ -946,130 +518,30 @@ jobs:
                   System.loadLibrary("danz_nebula");
               }
 
-              public static native String nativeBuildCoreScript(int mask, int sensiLevel, int baseDensity, boolean isLiveInGameTrigger, String nativeDir);
+              public static native String nativeBuildCoreScript(int mask, int sensiLevel, String nativeDir);
 
               private WebView webView;
-              private static final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
-              private static final Handler mainHandler = new Handler(Looper.getMainLooper());
+              private final ExecutorService bgExecutor = Executors.newSingleThreadExecutor();
+              private final Handler mainHandler = new Handler(Looper.getMainLooper());
               private boolean cleanedOnce = false;
-              public static int stockBaseDensity = 440;
-              public static int stockWidthPx = 1080;
 
-              public static boolean featAimbot = true;
-              public static boolean featAim = true;
-              public static boolean featAimLock = true;
-              public static boolean featAimDrag = true;
-              public static boolean featEasyDrag = true;
-              public static boolean featSmoothAim = true;
-              public static boolean featAimLegit = true;
-              public static boolean featSensivity = true;
-              public static int sensiLevel = 7;
-
-              public static boolean getFeatureState(int id) {
-                  if (id == 1) return featAim;
-                  if (id == 2) return featEasyDrag;
-                  if (id == 3) return featSmoothAim;
-                  if (id == 4) return featAimLegit;
-                  if (id == 5) return featSensivity;
-                  if (id == 6) return featAimDrag;
-                  if (id == 7) return featAimLock;
-                  if (id == 8) return featAimbot;
-                  return false;
-              }
-
-              public static void setFeatureState(int id, boolean on) {
-                  if (id == 1) featAim = on;
-                  else if (id == 2) featEasyDrag = on;
-                  else if (id == 3) featSmoothAim = on;
-                  else if (id == 4) featAimLegit = on;
-                  else if (id == 5) featSensivity = on;
-                  else if (id == 6) featAimDrag = on;
-                  else if (id == 7) featAimLock = on;
-                  else if (id == 8) featAimbot = on;
-              }
-
-              public static int getFeatureMask() {
-                  int mask = 0;
-                  if (featAim)       mask |= 1;
-                  if (featEasyDrag)  mask |= 2;
-                  if (featSmoothAim) mask |= 4;
-                  if (featAimLegit)  mask |= 8;
-                  if (featSensivity) mask |= 16;
-                  if (featAimDrag)   mask |= 32;
-                  if (featAimLock)   mask |= 64;
-                  if (featAimbot)    mask |= 128;
-                  return mask;
-              }
-
-              // Menghitung nilai Lebar Minimum (DP) efektif yang aktif di dalam Free Fire
-              public static int calculateEffectiveFFDp() {
-                  int red = 0;
-                  if (featSensivity) red += (6 + (sensiLevel * 4));
-                  if (featAimbot)    red += 5;
-                  if (featAim)       red += 3;
-                  if (featAimLock)   red += 4;
-                  if (featAimDrag)   red += 6;
-                  if (featEasyDrag)  red += 4;
-                  if (red > 52) red = 52;
-                  int targetDpi = (stockBaseDensity * (100 - red)) / 100;
-                  if (targetDpi < 180) targetDpi = 180;
-                  return (stockWidthPx * 160) / targetDpi;
-              }
-
-              public static void triggerLiveInGameInjection(Context ctx, boolean forceImmediateInGame, String toastMsg) {
-                  bgExecutor.execute(() -> {
-                      int mask = getFeatureMask();
-                      String script = nativeBuildCoreScript(
-                          mask,
-                          sensiLevel,
-                          stockBaseDensity,
-                          forceImmediateInGame,
-                          ctx.getApplicationInfo().nativeLibraryDir
-                      );
-                      executeShizukuStatic(ctx, script, toastMsg);
-                  });
-              }
-
-              public static void executeShizukuStatic(Context ctx, String script, String toastMsg) {
-                  bgExecutor.execute(() -> {
-                      try {
-                          if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                              if (toastMsg != null) {
-                                  mainHandler.post(() -> Toast.makeText(ctx, "Shizuku belum aktif/diizinkan!", Toast.LENGTH_SHORT).show());
-                              }
-                              return;
-                          }
-                          Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
-                          m.setAccessible(true);
-                          java.lang.Process p = (java.lang.Process) m.invoke(
-                              null,
-                              new String[]{"sh", "-c", script + "\nexit 0"},
-                              null,
-                              null
-                          );
-                          try { p.getOutputStream().close(); } catch (Exception ignored) {}
-                          try { p.getInputStream().close(); } catch (Exception ignored) {}
-                          try { p.getErrorStream().close(); } catch (Exception ignored) {}
-                          p.waitFor();
-
-                          if (toastMsg != null) {
-                              mainHandler.post(() -> Toast.makeText(ctx, toastMsg, Toast.LENGTH_SHORT).show());
-                          }
-                      } catch (Throwable e) {
-                          if (toastMsg != null) {
-                              mainHandler.post(() -> Toast.makeText(ctx, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
-                          }
-                      }
-                  });
-              }
+              private boolean featAimbot = false;
+              private boolean featAim = false;
+              private boolean featAimLock = false;
+              private boolean featAimDrag = false;
+              private boolean featEasyDrag = false;
+              private boolean featSmoothAim = false;
+              private boolean featAimLegit = false;
+              private boolean featSensivity = false;
+              private int sensiLevel = 7;
 
               private final Shizuku.OnRequestPermissionResultListener PERM_LISTENER = (req, res) -> {
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
                   runOnUiThread(() -> {
                       if (ok) {
-                          Toast.makeText(MainActivity.this, "Shizuku Terhubung! Engine V31 Siap.", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(MainActivity.this, "Shizuku & Engine V32 Terhubung!", Toast.LENGTH_SHORT).show();
                           webView.evaluateJavascript("setShizukuStatus(true)", null);
-                          cleanAndGrantOverlayPermission();
+                          cleanOldHooksOnce();
                       } else {
                           Toast.makeText(MainActivity.this, "Izin Shizuku Ditolak", Toast.LENGTH_LONG).show();
                       }
@@ -1082,13 +554,6 @@ jobs:
                   supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
                   getWindow().setStatusBarColor(Color.parseColor("#0B0E14"));
                   getWindow().setNavigationBarColor(Color.parseColor("#0B0E14"));
-
-                  DisplayMetrics dm = new DisplayMetrics();
-                  getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-                  stockWidthPx = Math.min(dm.widthPixels, dm.heightPixels);
-                  if (dm.densityDpi >= 240 && dm.densityDpi <= 640) {
-                      stockBaseDensity = dm.densityDpi;
-                  }
 
                   Shizuku.addRequestPermissionResultListener(PERM_LISTENER);
 
@@ -1104,45 +569,85 @@ jobs:
               }
 
               @Override
-              public void onConfigurationChanged(Configuration newConfig) {
-                  super.onConfigurationChanged(newConfig);
-              }
-
-              @Override
               protected void onDestroy() {
                   Shizuku.removeRequestPermissionResultListener(PERM_LISTENER);
+                  bgExecutor.shutdownNow();
                   super.onDestroy();
               }
 
-              private void cleanAndGrantOverlayPermission() {
+              private int getFeatureMask() {
+                  int mask = 0;
+                  if (featAim)       mask |= 1;
+                  if (featEasyDrag)  mask |= 2;
+                  if (featSmoothAim) mask |= 4;
+                  if (featAimLegit)  mask |= 8;
+                  if (featSensivity) mask |= 16;
+                  if (featAimDrag)   mask |= 32;
+                  if (featAimLock)   mask |= 64;
+                  if (featAimbot)    mask |= 128;
+                  return mask;
+              }
+
+              private void cleanOldHooksOnce() {
                   if (cleanedOnce) return;
                   cleanedOnce = true;
                   StringBuilder clean = new StringBuilder();
-                  clean.append("appops set com.danzstraight.mod SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1\n");
-                  clean.append("cmd appops set com.danzstraight.mod SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1\n");
                   clean.append("wm size reset >/dev/null 2>&1\n");
                   clean.append("wm density reset >/dev/null 2>&1\n");
-                  executeShizukuStatic(this, clean.toString(), null);
+                  String[] compatFlags = {"DOWNSCALED","DOWNSCALE_90","DOWNSCALE_85","DOWNSCALE_80","DOWNSCALE_75","DOWNSCALE_70","DOWNSCALE_65","DOWNSCALE_60","DOWNSCALE_55","DOWNSCALE_50","DOWNSCALE_45","DOWNSCALE_40","DOWNSCALE_35","DOWNSCALE_30"};
+                  for (String f : compatFlags) {
+                      clean.append("am compat reset ").append(f).append(" com.dts.freefireth >/dev/null 2>&1\n");
+                      clean.append("am compat reset ").append(f).append(" com.dts.freefiremax >/dev/null 2>&1\n");
+                  }
+                  clean.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefireth/files/danz_headshot >/dev/null 2>&1\n");
+                  clean.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefiremax/files/danz_headshot >/dev/null 2>&1\n");
+                  clean.append("rm -f /storage/emulated/0/Android/data/com.dts.freefireth/files/headshot_bone_v30.cfg >/dev/null 2>&1\n");
+                  clean.append("rm -f /storage/emulated/0/Android/data/com.dts.freefiremax/files/headshot_bone_v30.cfg >/dev/null 2>&1\n");
+                  executeShizukuClean(clean.toString(), null);
               }
 
-              private void startFloatingPanelService() {
+              private void executeShizukuClean(String script, String toastMsg) {
                   bgExecutor.execute(() -> {
-                      executeShizukuStatic(
-                          MainActivity.this,
-                          "appops set com.danzstraight.mod SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1\n" +
-                          "cmd appops set com.danzstraight.mod SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1\n",
-                          null
-                      );
-                      mainHandler.postDelayed(() -> {
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(MainActivity.this)) {
-                              Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-                              startActivity(intent);
-                              Toast.makeText(MainActivity.this, "Izinkan 'Tampilkan di atas aplikasi lain' satu kali", Toast.LENGTH_LONG).show();
-                          } else {
-                              startService(new Intent(MainActivity.this, FloatingModService.class));
-                              Toast.makeText(MainActivity.this, "Panel In-Game [DZ] Aktif!", Toast.LENGTH_SHORT).show();
+                      try {
+                          if (!Shizuku.pingBinder()) {
+                              if (toastMsg != null) {
+                                  runOnUiThread(() -> Toast.makeText(MainActivity.this, "Shizuku belum berjalan!", Toast.LENGTH_LONG).show());
+                              }
+                              return;
                           }
-                      }, 300);
+                          if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                              runOnUiThread(() -> {
+                                  Shizuku.requestPermission(101);
+                                  Toast.makeText(MainActivity.this, "Izinkan pop-up Shizuku terlebih dahulu", Toast.LENGTH_LONG).show();
+                              });
+                              return;
+                          }
+
+                          Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+                          m.setAccessible(true);
+                          java.lang.Process p = (java.lang.Process) m.invoke(
+                              null,
+                              new String[]{"sh", "-c", script + "\nexit 0"},
+                              null,
+                              null
+                          );
+                          try { p.getOutputStream().close(); } catch (Exception ignored) {}
+                          try { p.getInputStream().close(); } catch (Exception ignored) {}
+                          try { p.getErrorStream().close(); } catch (Exception ignored) {}
+
+                          p.waitFor();
+
+                          if (toastMsg != null) {
+                              runOnUiThread(() -> {
+                                  webView.evaluateJavascript("updateEngineBadge(" + (getFeatureMask() != 0) + ")", null);
+                                  Toast.makeText(MainActivity.this, toastMsg, Toast.LENGTH_SHORT).show();
+                              });
+                          }
+                      } catch (Throwable e) {
+                          if (toastMsg != null) {
+                              runOnUiThread(() -> Toast.makeText(MainActivity.this, "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                          }
+                      }
                   });
               }
 
@@ -1165,7 +670,7 @@ jobs:
                               }
                               if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                                   webView.evaluateJavascript("setShizukuStatus(true)", null);
-                                  cleanAndGrantOverlayPermission();
+                                  cleanOldHooksOnce();
                               } else {
                                   Shizuku.requestPermission(101);
                               }
@@ -1185,30 +690,23 @@ jobs:
                   }
 
                   @JavascriptInterface
-                  public void openFloatingPanel() {
-                      runOnUiThread(() -> startFloatingPanelService());
-                  }
-
-                  @JavascriptInterface
-                  public void closeFloatingPanel() {
-                      runOnUiThread(() -> {
-                          stopService(new Intent(MainActivity.this, FloatingModService.class));
-                          Toast.makeText(MainActivity.this, "Panel Melayang Ditutup", Toast.LENGTH_SHORT).show();
-                      });
-                  }
-
-                  @JavascriptInterface
                   public void toggleFeature(int id, String name, boolean on, int sensi) {
                       sensiLevel = sensi;
-                      setFeatureState(id, on);
-                      int effDp = calculateEffectiveFFDp();
-                      // Saat di dalam menu aplikasi, jangan paksa ubah layar HP (false), biarkan daemon C++ mengaktifkannya otomatis saat Free Fire dibuka!
-                      triggerLiveInGameInjection(
-                          MainActivity.this,
-                          false,
-                          name + (on ? " Siap (" + effDp + " DP otomatis aktif saat masuk FF)!" : " Nonaktif")
-                      );
-                      runOnUiThread(() -> webView.evaluateJavascript("updateEngineBadge(" + effDp + ")", null));
+                      if (id == 1) featAim = on;
+                      else if (id == 2) featEasyDrag = on;
+                      else if (id == 3) featSmoothAim = on;
+                      else if (id == 4) featAimLegit = on;
+                      else if (id == 5) featSensivity = on;
+                      else if (id == 6) featAimDrag = on;
+                      else if (id == 7) featAimLock = on;
+                      else if (id == 8) featAimbot = on;
+
+                      int mask = getFeatureMask();
+                      String script = nativeBuildCoreScript(mask, sensiLevel, getApplicationInfo().nativeLibraryDir);
+                      String msg = (id == 5 && on)
+                          ? ("Sensivity Lv." + sensi + " Aktif di Sistem FF!")
+                          : (name + (on ? " Aktif di Sistem FF!" : " Nonaktif"));
+                      executeShizukuClean(script, msg);
                   }
 
                   @JavascriptInterface
@@ -1221,10 +719,25 @@ jobs:
                       featSmoothAim = false;
                       featAimLegit = false;
                       featSensivity = false;
-                      stopService(new Intent(MainActivity.this, FloatingModService.class));
-                      String stopBin = nativeBuildCoreScript(0, 7, stockBaseDensity, false, getApplicationInfo().nativeLibraryDir);
-                      executeShizukuStatic(MainActivity.this, stopBin, "Semua Fitur Dihapus & Layar 100% Standar!");
-                      runOnUiThread(() -> webView.evaluateJavascript("updateEngineBadge(360)", null));
+                      String stopBin = nativeBuildCoreScript(0, 7, getApplicationInfo().nativeLibraryDir);
+                      String resetCmd = stopBin + "\n" +
+                          "device_config delete input_native_boot velocitytracker_strategy >/dev/null 2>&1\n" +
+                          "device_config delete input_native_boot resample_touch >/dev/null 2>&1\n" +
+                          "settings put global pointer_speed 0 >/dev/null 2>&1\n" +
+                          "settings put system pointer_speed 0 >/dev/null 2>&1\n" +
+                          "settings put system high_touch_sensitivity_enable 0 >/dev/null 2>&1\n" +
+                          "settings put system glove_mode 0 >/dev/null 2>&1\n" +
+                          "settings delete global touch_slop >/dev/null 2>&1\n" +
+                          "settings delete secure touch_slop >/dev/null 2>&1\n" +
+                          "settings put secure long_press_timeout 400 >/dev/null 2>&1\n" +
+                          "settings put secure multi_press_timeout 300 >/dev/null 2>&1\n" +
+                          "settings put global window_animation_scale 1.0 >/dev/null 2>&1\n" +
+                          "settings put global transition_animation_scale 1.0 >/dev/null 2>&1\n" +
+                          "settings put global animator_duration_scale 1.0 >/dev/null 2>&1\n" +
+                          "cmd power set-fixed-performance-mode-enabled false >/dev/null 2>&1\n" +
+                          "cmd thermalservice reset >/dev/null 2>&1\n";
+                      executeShizukuClean(resetCmd, "Semua Fitur Direset ke Standar!");
+                      runOnUiThread(() -> webView.evaluateJavascript("updateEngineBadge(false)", null));
                   }
 
                   @JavascriptInterface
@@ -1234,14 +747,12 @@ jobs:
 
                   @JavascriptInterface
                   public void launchFreeFire() {
-                      runOnUiThread(() -> startFloatingPanelService());
-                      int effDp = calculateEffectiveFFDp();
-                      triggerLiveInGameInjection(
-                          MainActivity.this,
-                          false,
-                          "Membuka Free Fire (" + effDp + " DP + Auto-Restore Saat Keluar FF)!"
-                      );
-                      runOnUiThread(() -> {
+                      int mask = getFeatureMask();
+                      if (mask != 0) {
+                          String script = nativeBuildCoreScript(mask, sensiLevel, getApplicationInfo().nativeLibraryDir);
+                          executeShizukuClean(script, "Injektor C++ Aktif! Membuka Free Fire...");
+                      }
+                      mainHandler.postDelayed(() -> {
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
@@ -1251,13 +762,13 @@ jobs:
                           } else {
                               Toast.makeText(MainActivity.this, "Silakan buka aplikasi Free Fire", Toast.LENGTH_LONG).show();
                           }
-                      });
+                      }, 600);
                   }
               }
           }
           EOF
 
-          # 8. Antarmuka V31: Menampilkan Kalkulasi DP In-Game Nyata & Kontrol Panel Melayang
+          # 7. Antarmuka V32: Bersih (Tanpa Panel Melayang & Tanpa File Headshot, Fokus 8 Fitur Utama)
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -1297,11 +808,7 @@ jobs:
             .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
             .btn-rst { background: #26161B; color: #FF6B6B; border: 1px solid #4A222A; padding: 7px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; }
 
-            .floating-card { background: linear-gradient(145deg, #112233, #0D1520); border: 1.5px solid var(--accent); border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: 0 0 16px var(--accent-glow); }
-            .fl-title { font-size: 14px; font-weight: 900; color: var(--accent); margin-bottom: 4px; }
-            .fl-sub { font-size: 11px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
-            .fl-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-
+            .engine-bar { background: #0E1722; border: 1px solid #1E3A5F; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
             .feat-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; transition: 0.15s; }
             .feat-card.on { border-color: var(--green); background: linear-gradient(145deg, #131822 60%, #0F261D 100%); }
             .feat-top { display: flex; justify-content: space-between; align-items: center; }
@@ -1334,7 +841,7 @@ jobs:
             <div class="login-wrap" id="login-screen">
               <div class="login-box">
                 <div class="brand-title">DANZ<span>STRAIGHT</span></div>
-                <div class="brand-sub">50MB Real In-Game Engine & Floating Panel v31.0</div>
+                <div class="brand-sub">50MB Direct Free Fire In-Game Injector v32.0</div>
 
                 <div class="box-inner">
                   <div class="row-sb">
@@ -1360,93 +867,83 @@ jobs:
             <div class="header">
               <div>
                 <div class="brand-title">DANZ<span>STRAIGHT</span></div>
-                <div style="font-size:11px;color:var(--muted)">Real In-Game FF Matrix (Auto Normal Saat Keluar FF)</div>
+                <div style="font-size:11px;color:var(--muted)">Direct Free Fire System Injector v32</div>
               </div>
-              <button class="btn-rst" onclick="resetAllUI()">Reset FF</button>
+              <button class="btn-rst" onclick="resetAllUI()">Reset</button>
             </div>
 
-            <!-- PANEL KONTROL FLOATING MENU IN-GAME -->
-            <div class="floating-card">
-              <div class="row-sb" style="margin-bottom:4px">
-                <span class="fl-title">Panel In-Game [DZ] (Auto-Detect FF)</span>
-                <span class="pill ok" id="daemon-badge">In-Game: 750 DP</span>
-              </div>
-              <div class="fl-sub">
-                Matriks kelicinan & pengunci kepala <b>hanya aktif saat Free Fire sedang terbuka di layar</b> (atau saat kamu klik <b>⚡ INJECT KE SISTEM FF</b> di panel <b>[DZ]</b>). Begitu keluar dari Free Fire, layar HP otomatis kembali 100% normal!
-              </div>
-              <div class="fl-btns">
-                <button class="btn-main" style="padding:10px;font-size:12px" onclick="AndroidBridge.openFloatingPanel()">Munculkan Panel [DZ]</button>
-                <button class="btn-dark" style="padding:10px;font-size:12px" onclick="AndroidBridge.closeFloatingPanel()">Tutup Panel</button>
-              </div>
+            <div class="engine-bar">
+              <span>C++ Daemon (/data/local/tmp/danz_ff_injector)</span>
+              <span class="pill" id="daemon-badge">Siaga</span>
             </div>
 
             <!-- DAFTAR 8 FITUR UTAMA -->
             <!-- 1. Aimbot -->
-            <div class="feat-card on" id="card-8">
+            <div class="feat-card" id="card-8">
               <div class="feat-top">
                 <div class="feat-title">Aimbot</div>
-                <label class="sw"><input type="checkbox" id="sw-8" checked onchange="trigMod(8,'Aimbot')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-8" onchange="trigMod(8,'Aimbot')"><span class="sl"></span></label>
               </div>
             </div>
 
             <!-- 2. Aim -->
-            <div class="feat-card on" id="card-1">
+            <div class="feat-card" id="card-1">
               <div class="feat-top">
                 <div class="feat-title">Aim</div>
-                <label class="sw"><input type="checkbox" id="sw-1" checked onchange="trigMod(1,'Aim')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-1" onchange="trigMod(1,'Aim')"><span class="sl"></span></label>
               </div>
             </div>
 
             <!-- 3. Aim Lock -->
-            <div class="feat-card on" id="card-7">
+            <div class="feat-card" id="card-7">
               <div class="feat-top">
                 <div class="feat-title">Aim Lock</div>
-                <label class="sw"><input type="checkbox" id="sw-7" checked onchange="trigMod(7,'Aim Lock')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-7" onchange="trigMod(7,'Aim Lock')"><span class="sl"></span></label>
               </div>
             </div>
 
             <!-- 4. Aim Drag -->
-            <div class="feat-card on" id="card-6">
+            <div class="feat-card" id="card-6">
               <div class="feat-top">
                 <div class="feat-title">Aim Drag</div>
-                <label class="sw"><input type="checkbox" id="sw-6" checked onchange="trigMod(6,'Aim Drag')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-6" onchange="trigMod(6,'Aim Drag')"><span class="sl"></span></label>
               </div>
             </div>
 
             <!-- 5. Easy Drag -->
-            <div class="feat-card on" id="card-2">
+            <div class="feat-card" id="card-2">
               <div class="feat-top">
                 <div class="feat-title">Easy Drag</div>
-                <label class="sw"><input type="checkbox" id="sw-2" checked onchange="trigMod(2,'Easy Drag')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-2" onchange="trigMod(2,'Easy Drag')"><span class="sl"></span></label>
               </div>
             </div>
 
             <!-- 6. Smooth Aim -->
-            <div class="feat-card on" id="card-3">
+            <div class="feat-card" id="card-3">
               <div class="feat-top">
                 <div class="feat-title">Smooth Aim</div>
-                <label class="sw"><input type="checkbox" id="sw-3" checked onchange="trigMod(3,'Smooth Aim')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-3" onchange="trigMod(3,'Smooth Aim')"><span class="sl"></span></label>
               </div>
             </div>
 
             <!-- 7. Aim Legit -->
-            <div class="feat-card on" id="card-4">
+            <div class="feat-card" id="card-4">
               <div class="feat-top">
                 <div class="feat-title">Aim Legit</div>
-                <label class="sw"><input type="checkbox" id="sw-4" checked onchange="trigMod(4,'Aim Legit')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-4" onchange="trigMod(4,'Aim Legit')"><span class="sl"></span></label>
               </div>
             </div>
 
             <!-- 8. Sensivity -->
-            <div class="feat-card on" id="card-5">
+            <div class="feat-card" id="card-5">
               <div class="feat-top">
                 <div class="feat-title">Sensivity</div>
-                <label class="sw"><input type="checkbox" id="sw-5" checked onchange="trigMod(5,'Sensivity')"><span class="sl"></span></label>
+                <label class="sw"><input type="checkbox" id="sw-5" onchange="trigMod(5,'Sensivity')"><span class="sl"></span></label>
               </div>
               <div class="sensi-Control">
                 <div class="row-sb" style="margin:0">
                   <span style="color:var(--muted)">Level Sensivity</span>
-                  <b style="color:var(--accent)" id="sensi-txt">7 (MAX LICIN)</b>
+                  <b style="color:var(--accent)" id="sensi-txt">7 (MAX)</b>
                 </div>
                 <input type="range" min="1" max="7" step="1" value="7" class="range-styled" id="sensi-slider" oninput="onSensiSlide(this.value)" onchange="onSensiChange(this.value)">
               </div>
@@ -1466,11 +963,10 @@ jobs:
               <div id="key-list"></div>
             </div>
 
-            <button class="btn-main" style="margin-top:8px" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire + Panel In-Game</button>
+            <button class="btn-main" style="margin-top:8px" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire</button>
 
             <div class="bottom-nav">
               <div class="nav-it active" onclick="window.scrollTo(0,0)">Menu Utama</div>
-              <div class="nav-it" onclick="AndroidBridge.openFloatingPanel()">Panel [DZ]</div>
               <div class="nav-it hidden" id="nav-dev" onclick="document.getElementById('dev-panel').classList.toggle('hidden')">Panel Key</div>
               <div class="nav-it" onclick="AndroidBridge.launchFreeFire()">Buka FF</div>
             </div>
@@ -1488,10 +984,16 @@ jobs:
                 if (ok) { p.innerText = "Terhubung"; p.classList.add('ok'); }
               }
 
-              function updateEngineBadge(dpVal) {
+              function updateEngineBadge(active) {
                 const b = document.getElementById('daemon-badge');
                 if (!b) return;
-                b.innerText = "In-Game: " + dpVal + " DP";
+                if (active) {
+                  b.innerText = "Aktif di Sistem FF";
+                  b.classList.add('ok');
+                } else {
+                  b.innerText = "Siaga";
+                  b.classList.remove('ok');
+                }
               }
 
               function trigMod(id, name) {
@@ -1503,7 +1005,7 @@ jobs:
               }
 
               function onSensiSlide(val) {
-                document.getElementById('sensi-txt').innerText = (val == 7) ? "7 (MAX LICIN)" : val;
+                document.getElementById('sensi-txt').innerText = (val == 7) ? "7 (MAX)" : val;
               }
 
               function onSensiChange(val) {
@@ -1525,17 +1027,17 @@ jobs:
               }
 
               function getKeys() {
-                const r = localStorage.getItem('danz_v31_keys');
+                const r = localStorage.getItem('danz_v32_keys');
                 if (!r) {
                   const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v31_keys', JSON.stringify(d));
+                  localStorage.setItem('danz_v32_keys', JSON.stringify(d));
                   return d;
                 }
                 return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v31_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v32_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
@@ -1610,8 +1112,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V31 APK
+      - name: Upload DANZSTRAIGHT V32 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V31-REAL-ENGINE
+          name: DANZSTRAIGHT-V32-CLEAN-INGAME
           path: clean_apk/app/build/outputs/apk/debug/*.apk
