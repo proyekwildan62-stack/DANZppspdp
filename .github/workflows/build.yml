@@ -1,4 +1,4 @@
-name: Build DANZSTRAIGHT V8 Pure FF Package
+name: Build DANZSTRAIGHT V9 Graphic Studio
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build Pure Free Fire Package Injector APK
+      - name: Build DANZSTRAIGHT V9 APK
         run: |
           rm -rf clean_apk
           mkdir -p clean_apk/app/src/main/java/com/danzstraight/mod
@@ -47,8 +47,8 @@ jobs:
               applicationId "com.danzstraight.mod"
               minSdk 24
               targetSdk 33
-              versionCode 80
-              versionName "8.0"
+              versionCode 90
+              versionName "9.0"
             }
             compileOptions {
               sourceCompatibility JavaVersion.VERSION_17
@@ -117,14 +117,14 @@ jobs:
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
                   Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
-                  String info = intent != null ? intent.getStringExtra("status") : "Injeksi Paket Free Fire Aktif";
+                  String info = intent != null ? intent.getStringExtra("status") : "Preset Grafik & Aim Aktif";
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      String cid = "danz_ff_pkg";
-                      NotificationChannel ch = new NotificationChannel(cid, "DANZSTRAIGHT FF Engine", NotificationManager.IMPORTANCE_LOW);
+                      String cid = "danz_v9_channel";
+                      NotificationChannel ch = new NotificationChannel(cid, "DANZSTRAIGHT Engine", NotificationManager.IMPORTANCE_LOW);
                       NotificationManager nm = getSystemService(NotificationManager.class);
                       if (nm != null) nm.createNotificationChannel(ch);
                       Notification n = new Notification.Builder(this, cid)
-                              .setContentTitle("DANZSTRAIGHT - Sistem Free Fire")
+                              .setContentTitle("DANZSTRAIGHT Aktif untuk Free Fire")
                               .setContentText(info)
                               .setSmallIcon(android.R.drawable.ic_media_play)
                               .setOngoing(true)
@@ -156,6 +156,7 @@ jobs:
           import android.widget.Toast;
           import java.io.OutputStream;
           import java.lang.reflect.Method;
+          import java.util.Locale;
           import rikka.shizuku.Shizuku;
 
           public class MainActivity extends Activity {
@@ -165,7 +166,7 @@ jobs:
                   boolean ok = (res == PackageManager.PERMISSION_GRANTED);
                   runOnUiThread(() -> {
                       if (ok) {
-                          Toast.makeText(MainActivity.this, "Shizuku Terhubung ke Paket Free Fire", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(MainActivity.this, "Shizuku Terhubung!", Toast.LENGTH_SHORT).show();
                           webView.evaluateJavascript("setShizukuStatus(true)", null);
                       } else {
                           Toast.makeText(MainActivity.this, "Izin Shizuku Ditolak", Toast.LENGTH_LONG).show();
@@ -177,8 +178,8 @@ jobs:
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   requestWindowFeature(Window.FEATURE_NO_TITLE);
-                  getWindow().setStatusBarColor(Color.parseColor("#111214"));
-                  getWindow().setNavigationBarColor(Color.parseColor("#111214"));
+                  getWindow().setStatusBarColor(Color.parseColor("#0D1117"));
+                  getWindow().setNavigationBarColor(Color.parseColor("#0D1117"));
 
                   Shizuku.addRequestPermissionResultListener(PERM_LISTENER);
 
@@ -186,7 +187,7 @@ jobs:
                   WebSettings s = webView.getSettings();
                   s.setJavaScriptEnabled(true);
                   s.setDomStorageEnabled(true);
-                  webView.setBackgroundColor(Color.parseColor("#111214"));
+                  webView.setBackgroundColor(Color.parseColor("#0D1117"));
                   webView.setWebViewClient(new WebViewClient());
                   webView.addJavascriptInterface(new Bridge(), "AndroidBridge");
                   webView.loadUrl("file:///android_asset/index.html");
@@ -267,121 +268,129 @@ jobs:
                       });
                   }
 
-                  // MURNI MENEMBAK PAKET & PROSES FREE FIRE (TANPA PENGATURAN HP & TANPA DOWNSCALE)
+                  // SIMPAN PRESET TEKSTUR & MODE RINGAN KHUSUS FREE FIRE (PERSIS FOTO 1 & 2)
                   @JavascriptInterface
-                  public String runFeature(int id, String name, boolean on, int sensi, int lightMode) {
+                  public String applyGraphicStudio(boolean enableTex, int texLevel, boolean sharpPixel, boolean hardLod, boolean enableLight, int resPercent) {
                       StringBuilder cmd = new StringBuilder();
 
-                      if (id == 1) { // Aim Merah (Drag HS) -> Kompilasi Native Speed & Prioritas Thread Input FF
+                      // 1. Tutup paksa Free Fire terlebih dahulu agar perubahan langsung terbaca saat dibuka ulang
+                      cmd.append("am force-stop com.dts.freefireth\n");
+                      cmd.append("am force-stop com.dts.freefiremax\n");
+
+                      // 2. Bersihkan cache shader & tekstur lama Free Fire
+                      cmd.append("rm -rf /sdcard/Android/data/com.dts.freefireth/cache/*\n");
+                      cmd.append("rm -rf /sdcard/Android/data/com.dts.freefiremax/cache/*\n");
+                      cmd.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefireth/cache/*\n");
+                      cmd.append("rm -rf /storage/emulated/0/Android/data/com.dts.freefiremax/cache/*\n");
+
+                      if (!enableTex && !enableLight) {
+                          cmd.append("device_config delete game_overlay com.dts.freefireth\n");
+                          cmd.append("device_config delete game_overlay com.dts.freefiremax\n");
+                          cmd.append("cmd game reset com.dts.freefireth\n");
+                          cmd.append("cmd game reset com.dts.freefiremax\n");
+                          cmd.append("settings delete global angle_gl_driver_selection_pkgs\n");
+                          cmd.append("settings delete global angle_gl_driver_selection_values\n");
+                          cmd.append("settings delete global enable_gpu_debug_layers\n");
+                      } else {
+                          // Hitung faktor skala internal Free Fire (Tanpa mengubah ukuran layar HP)
+                          double scale = 1.0;
+                          if (enableLight) {
+                              scale = resPercent / 100.0; // 0.50 s/d 0.90 sesuai slider Mode Ringan
+                          }
+                          if (enableTex) {
+                              // Level Tekstur: 1=Asli, 2=Ringan, 3=Retro, 4=Kotak, 5=Ekstrem
+                              double texScale = 1.0 - ((texLevel - 1) * 0.14); // 1.0, 0.86, 0.72, 0.58, 0.44
+                              if (texScale < scale) scale = texScale;
+
+                              // Piksel Tajam (Nearest Filtering) vs Halus + Batas Jarak Tegas (LOD)
+                              if (sharpPixel) {
+                                  cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
+                                  cmd.append("settings put global angle_gl_driver_selection_values angle,angle\n");
+                                  cmd.append("setprop debug.hwui.renderer skiagl\n");
+                              } else {
+                                  cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
+                                  cmd.append("settings put global angle_gl_driver_selection_values native,native\n");
+                                  cmd.append("setprop debug.hwui.renderer opengl\n");
+                              }
+
+                              if (hardLod) {
+                                  cmd.append("settings put global enable_gpu_debug_layers 1\n");
+                                  cmd.append("settings put global gpu_debug_app com.dts.freefireth\n");
+                                  cmd.append("settings put global updatable_driver_production_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
+                              } else {
+                                  cmd.append("settings put global enable_gpu_debug_layers 0\n");
+                              }
+                          }
+
+                          String factorStr = String.format(Locale.US, "%.2f", Math.max(0.35, Math.min(1.0, scale)));
+                          String useAngle = sharpPixel ? ",useAngle=true" : "";
+
+                          cmd.append("device_config put game_overlay com.dts.freefireth mode=2,downscaleFactor=")
+                             .append(factorStr).append(",fps=120,loadingBoost=99999999").append(useAngle)
+                             .append(":mode=3,downscaleFactor=").append(factorStr).append(",fps=120").append(useAngle).append("\n");
+
+                          cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,downscaleFactor=")
+                             .append(factorStr).append(",fps=120,loadingBoost=99999999").append(useAngle)
+                             .append(":mode=3,downscaleFactor=").append(factorStr).append(",fps=120").append(useAngle).append("\n");
+
+                          cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefireth\n");
+                          cmd.append("cmd game set --mode 2 --downscale ").append(factorStr).append(" --fps 120 com.dts.freefiremax\n");
+                      }
+
+                      String res = execShizukuShell(cmd.toString());
+                      runOnUiThread(() -> {
+                          if (res.equals("OK")) {
+                              String summary = "Tekstur Lv." + texLevel + " & Resolusi " + resPercent + "% Aktif";
+                              startKeepAlive(summary);
+                              Toast.makeText(MainActivity.this, "Berhasil Disimpan ke Free Fire! Silakan buka game.", Toast.LENGTH_LONG).show();
+                          } else {
+                              Toast.makeText(MainActivity.this, res, Toast.LENGTH_LONG).show();
+                          }
+                      });
+                      return res;
+                  }
+
+                  // FITUR AIM & PERFORMA SISTEM FREE FIRE
+                  @JavascriptInterface
+                  public String runAimModule(int id, String name, boolean on, int sensi) {
+                      StringBuilder cmd = new StringBuilder();
+                      if (id == 1) { // Aim Merah (Drag HS)
                           if (on) {
                               cmd.append("cmd package compile -m speed -f com.dts.freefireth\n");
                               cmd.append("cmd package compile -m speed -f com.dts.freefiremax\n");
                               cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; done\n");
-                          } else {
-                              cmd.append("cmd package compile -m speed-profile com.dts.freefireth\n");
-                              cmd.append("cmd package compile -m speed-profile com.dts.freefiremax\n");
                           }
-                      } else if (id == 2) { // Easy Drag -> Real-Time I/O & CPU Affinity Khusus Proses FF
+                      } else if (id == 2) { // Easy Drag
                           if (on) {
                               cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done\n");
                               cmd.append("cmd activity send-trim-memory com.dts.freefireth RUNNING_LOW\n");
                               cmd.append("cmd activity send-trim-memory com.dts.freefiremax RUNNING_LOW\n");
-                          } else {
-                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do ionice -c 2 -n 4 -p $p; done\n");
                           }
-                      } else if (id == 3) { // Smooth Aim -> Hardware Game Driver & 120 FPS Khusus Paket FF (Tanpa Downscale)
+                      } else if (id == 3) { // Smooth Aim
                           if (on) {
                               cmd.append("settings put global game_driver_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
-                              cmd.append("settings put global game_driver_prerelease_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
-                              cmd.append("device_config put game_overlay com.dts.freefireth mode=2,fps=120:mode=3,fps=120\n");
-                              cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,fps=120:mode=3,fps=120\n");
-                              cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefireth\n");
-                              cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefiremax\n");
+                              cmd.append("cmd game mode performance com.dts.freefireth\n");
+                              cmd.append("cmd game mode performance com.dts.freefiremax\n");
                           } else {
                               cmd.append("settings delete global game_driver_opt_in_apps\n");
-                              cmd.append("settings delete global game_driver_prerelease_opt_in_apps\n");
-                              cmd.append("device_config delete game_overlay com.dts.freefireth\n");
-                              cmd.append("device_config delete game_overlay com.dts.freefiremax\n");
                           }
-                      } else if (id == 4) { // Aim Legit -> Whitelist Daya & Izin Prioritas Penuh Paket FF
+                      } else if (id == 4) { // Aim Legit
                           if (on) {
                               cmd.append("cmd deviceidle whitelist +com.dts.freefireth\n");
                               cmd.append("cmd deviceidle whitelist +com.dts.freefiremax\n");
                               cmd.append("cmd appops set com.dts.freefireth RUN_IN_BACKGROUND allow\n");
                               cmd.append("cmd appops set com.dts.freefiremax RUN_IN_BACKGROUND allow\n");
-                              cmd.append("cmd appops set com.dts.freefireth RUN_ANY_IN_BACKGROUND allow\n");
-                              cmd.append("cmd appops set com.dts.freefiremax RUN_ANY_IN_BACKGROUND allow\n");
-                          } else {
-                              cmd.append("cmd deviceidle whitelist -com.dts.freefireth\n");
-                              cmd.append("cmd deviceidle whitelist -com.dts.freefiremax\n");
                           }
-                      } else if (id == 5) { // Sensitivitas Sistem FF (Level 1 - 7 Langsung ke Thread Priority Proses FF)
-                          int niceVal = -(sensi * 2 + 4); // Level 1 (-6) s/d Level 7 (-18) khusus proses FF
+                      } else if (id == 5) { // Sensitivitas Proses FF (1-7)
+                          int niceVal = -(sensi * 2 + 4);
                           if (on) {
                               cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n ").append(niceVal).append(" -p $p; done\n");
-                              cmd.append("cmd game mode performance com.dts.freefireth\n");
-                              cmd.append("cmd game mode performance com.dts.freefiremax\n");
-                          } else {
-                              cmd.append("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n 0 -p $p; done\n");
-                          }
-                      } else if (id == 6) { // Boost Sistem FF -> Standby Bucket Active & Loading Boost Khusus FF
-                          if (on) {
-                              cmd.append("am set-standby-bucket com.dts.freefireth active\n");
-                              cmd.append("am set-standby-bucket com.dts.freefiremax active\n");
-                              cmd.append("cmd game mode performance com.dts.freefireth\n");
-                              cmd.append("cmd game mode performance com.dts.freefiremax\n");
-                              cmd.append("rm -rf /sdcard/Android/data/com.dts.freefireth/cache/*\n");
-                              cmd.append("rm -rf /sdcard/Android/data/com.dts.freefiremax/cache/*\n");
-                          } else {
-                              cmd.append("cmd game mode standard com.dts.freefireth\n");
-                              cmd.append("cmd game mode standard com.dts.freefiremax\n");
-                          }
-                      } else if (id == 7) { // GRAFIK RINGAN (Khusus Paket FF & Tanpa Downscale Sama Sekali)
-                          if (on) {
-                              if (lightMode == 1) {
-                                  // Mode 1: Super Ringan (Production Driver + Loading Boost FF Tanpa Downscale)
-                                  cmd.append("settings put global updatable_driver_production_opt_in_apps com.dts.freefireth,com.dts.freefiremax\n");
-                                  cmd.append("device_config put game_overlay com.dts.freefireth mode=2,fps=120,loadingBoost=99999999:mode=3,fps=120,loadingBoost=99999999\n");
-                                  cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,fps=120,loadingBoost=99999999:mode=3,fps=120,loadingBoost=99999999\n");
-                                  cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefireth\n");
-                                  cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefiremax\n");
-                              } else {
-                                  // Mode 2: Mode PC (ANGLE OpenGL Driver Murni Khusus Paket FF Tanpa Downscale)
-                                  cmd.append("settings put global angle_gl_driver_selection_pkgs com.dts.freefireth,com.dts.freefiremax\n");
-                                  cmd.append("settings put global angle_gl_driver_selection_values angle,angle\n");
-                                  cmd.append("device_config put game_overlay com.dts.freefireth mode=2,useAngle=true,fps=120,loadingBoost=99999999:mode=3,useAngle=true,fps=120\n");
-                                  cmd.append("device_config put game_overlay com.dts.freefiremax mode=2,useAngle=true,fps=120,loadingBoost=99999999:mode=3,useAngle=true,fps=120\n");
-                                  cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefireth\n");
-                                  cmd.append("cmd game set --mode 2 --fps 120 com.dts.freefiremax\n");
-                              }
-                          } else {
-                              cmd.append("settings delete global updatable_driver_production_opt_in_apps\n");
-                              cmd.append("settings delete global angle_gl_driver_selection_pkgs\n");
-                              cmd.append("settings delete global angle_gl_driver_selection_values\n");
-                              cmd.append("device_config delete game_overlay com.dts.freefireth\n");
-                              cmd.append("device_config delete game_overlay com.dts.freefiremax\n");
-                              cmd.append("cmd game reset com.dts.freefireth\n");
-                              cmd.append("cmd game reset com.dts.freefiremax\n");
                           }
                       }
 
                       String res = execShizukuShell(cmd.toString());
-
-                      runOnUiThread(() -> {
-                          if (res.equals("OK")) {
-                              startKeepAlive(name + " -> com.dts.freefireth");
-                              Toast.makeText(MainActivity.this, name + (on ? " Masuk ke Sistem FF" : " Direset dari FF"), Toast.LENGTH_SHORT).show();
-                          } else {
-                              Toast.makeText(MainActivity.this, res, Toast.LENGTH_LONG).show();
-                          }
-                      });
-                      return res.equals("OK") ? (name + (on ? " : Terinjeksi ke Paket FF" : " : Nonaktif")) : res;
-                  }
-
-                  @JavascriptInterface
-                  public void resetAll() {
-                      execShizukuShell("device_config delete game_overlay com.dts.freefireth\ndevice_config delete game_overlay com.dts.freefiremax\ncmd game reset com.dts.freefireth\ncmd game reset com.dts.freefiremax\nsettings delete global angle_gl_driver_selection_pkgs\nsettings delete global angle_gl_driver_selection_values\nsettings delete global game_driver_opt_in_apps\nsettings delete global updatable_driver_production_opt_in_apps\n");
-                      runOnUiThread(() -> Toast.makeText(MainActivity.this, "Semua Konfigurasi Paket Free Fire Direset", Toast.LENGTH_LONG).show());
+                      runOnUiThread(() -> Toast.makeText(MainActivity.this, res.equals("OK") ? (name + (on ? " Aktif" : " Nonaktif")) : res, Toast.LENGTH_SHORT).show());
+                      return res;
                   }
 
                   @JavascriptInterface
@@ -392,7 +401,6 @@ jobs:
                   @JavascriptInterface
                   public void launchFreeFire() {
                       runOnUiThread(() -> {
-                          startKeepAlive("Injeksi Paket Free Fire Berjalan");
                           PackageManager pm = getPackageManager();
                           Intent i = pm.getLaunchIntentForPackage("com.dts.freefireth");
                           if (i == null) i = pm.getLaunchIntentForPackage("com.dts.freefiremax");
@@ -403,7 +411,7 @@ jobs:
                                   execShizukuShell("for p in $(pidof com.dts.freefireth com.dts.freefiremax); do renice -n -20 -p $p; ionice -c 1 -n 0 -p $p; taskset -p -a ff $p; done\n");
                               }, 3500);
                           } else {
-                              Toast.makeText(MainActivity.this, "Konfigurasi FF Aktif. Silakan buka Free Fire.", Toast.LENGTH_LONG).show();
+                              Toast.makeText(MainActivity.this, "Silakan buka aplikasi Free Fire", Toast.LENGTH_LONG).show();
                           }
                       });
                   }
@@ -411,6 +419,7 @@ jobs:
           }
           EOF
 
+          # Antarmuka V9: Gabungan Studio Grafik (Persis Foto 1 & 2) + Modul Aim & Admin Key
           cat << 'EOF' > clean_apk/app/src/main/assets/index.html
           <!DOCTYPE html>
           <html lang="id">
@@ -419,261 +428,499 @@ jobs:
           <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
           <style>
             :root {
-              --bg: #111214;
-              --surface: #1A1C20;
-              --border: #2A2D34;
-              --accent: #D32F2F;
-              --active: #2E7D32;
-              --active-light: #4CAF50;
-              --text: #F1F3F5;
-              --muted: #90949C;
+              --bg: #0D1117;
+              --card: #151B23;
+              --card-2: #1B222C;
+              --border: #293241;
+              --cyan: #8CE0FF;
+              --cyan-glow: rgba(140, 224, 255, 0.25);
+              --text: #F0F6FC;
+              --muted: #8B949E;
+              --danger: #F85149;
             }
-            * { box-sizing: border-box; margin: 0; padding: 0; font-family: Roboto, -apple-system, sans-serif; user-select: none; }
-            body { background: var(--bg); color: var(--text); padding: 14px; padding-bottom: 80px; }
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, Roboto, sans-serif; user-select: none; }
+            body { background: var(--bg); color: var(--text); padding: 12px; padding-bottom: 82px; }
             .hidden { display: none !important; }
 
+            /* LOGIN GATE */
             .login-wrap { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
-            .login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
-            .app-name { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
-            .app-ver { font-size: 12px; color: var(--muted); margin-top: 2px; margin-bottom: 16px; }
-            .section-box { background: #141619; border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
-            .row-between { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 8px; }
-            .status-pill { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #331B1B; color: #EF5350; font-weight: 600; }
-            .status-pill.ok { background: #1B3320; color: #66BB6A; }
-            .btn { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 11px; font-size: 13px; font-weight: 600; cursor: pointer; }
-            .btn-secondary { background: #262930; color: var(--text); border: 1px solid var(--border); }
-            .input-field { width: 100%; background: #141619; border: 1px solid var(--border); border-radius: 6px; color: #fff; padding: 11px; font-size: 13px; margin-bottom: 12px; outline: none; }
-            .input-field:focus { border-color: var(--accent); }
+            .login-box { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+            .brand-title { font-size: 19px; font-weight: 800; letter-spacing: 0.5px; }
+            .brand-sub { font-size: 12px; color: var(--muted); margin: 3px 0 16px; }
+            .box-inner { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+            .row-sb { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 8px; }
+            .pill { font-size: 11px; padding: 3px 9px; border-radius: 20px; background: #331B1B; color: var(--danger); font-weight: 700; }
+            .pill.ok { background: #123524; color: #56D364; }
+            .inp { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; color: #fff; padding: 12px; font-size: 13px; margin-bottom: 12px; outline: none; }
+            .btn-cyan { width: 100%; background: var(--cyan); color: #061824; border: none; border-radius: 12px; padding: 12px; font-size: 14px; font-weight: 800; box-shadow: 0 0 18px var(--cyan-glow); cursor: pointer; }
+            .btn-dark { width: 100%; background: var(--card-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 12px; font-weight: 700; }
 
-            .top-bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
-            .btn-small { background: #262930; color: #EF5350; border: 1px solid #3E2723; padding: 6px 10px; border-radius: 5px; font-size: 11px; font-weight: 600; }
+            /* TOP SWITCHER TABS (TEKSTUR vs MODE RINGAN vs AIM) */
+            .top-tabs { display: flex; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 5px; margin-bottom: 14px; }
+            .tab-pill { flex: 1; text-align: center; padding: 9px 6px; border-radius: 12px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; transition: 0.15s; }
+            .tab-pill.active { background: var(--cyan); color: #051622; box-shadow: 0 0 14px var(--cyan-glow); }
 
-            .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-            .info-item { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
-            .info-label { font-size: 11px; color: var(--muted); }
-            .info-val { font-size: 13px; font-weight: 700; color: var(--active-light); margin-top: 2px; }
+            /* BEFORE / AFTER PREVIEW BOX (PERSIS FOTO 1 & 2) */
+            .preview-card { position: relative; width: 100%; height: 195px; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 12px; background: #1a2418; }
+            .prev-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
+            /* Simulasi Tekstur Bata & Rumput Sebelum vs Sesudah Kotak Minecraft */
+            .tex-before {
+              background:
+                linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.4) 100%),
+                repeating-linear-gradient(90deg, #5c4d3c 0px, #5c4d3c 28px, #2b231b 28px, #2b231b 30px),
+                repeating-linear-gradient(0deg, #6e5d49 0px, #6e5d49 14px, #2b231b 14px, #2b231b 16px);
+              background-blend-mode: overlay;
+            }
+            .tex-ground-before {
+              position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
+              background: radial-gradient(circle at 30% 40%, #3b5e2b, #28421d 60%, #4a3c2c 100%);
+              border-top: 2px solid #222;
+            }
+            .tex-after {
+              clip-path: polygon(50% 0, 100% 0, 100% 100%, 50% 100%);
+              background:
+                linear-gradient(135deg, #6b5c4c 25%, #594b3d 25%, #594b3d 50%, #6b5c4c 50%, #6b5c4c 75%, #473b30 75%);
+              background-size: 48px 48px;
+              image-rendering: pixelated;
+            }
+            .tex-ground-after {
+              position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
+              background:
+                conic-gradient(#3f6a2e 90deg, #345826 90deg 180deg, #4b5d30 180deg 270deg, #2e4d21 270deg);
+              background-size: 44px 44px;
+              image-rendering: pixelated;
+            }
 
-            .module-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
-            .module-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
-            .module-card.active { border-color: var(--active-light); }
-            .module-top { display: flex; justify-content: space-between; align-items: center; }
-            .module-title { font-size: 14px; font-weight: 600; }
-            .module-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+            /* Preview Mode Ringan (Langit Kota & Jalan) */
+            .res-before { background: linear-gradient(180deg, #0d1b2a 0%, #1b263b 60%, #2b3240 60%, #1e242d 100%); }
+            .res-after {
+              clip-path: polygon(50% 0, 100% 0, 100% 100%, 50% 100%);
+              background: linear-gradient(180deg, #0d1b2a 0%, #1b263b 60%, #2b3240 60%, #1e242d 100%);
+              filter: blur(1.6px) contrast(0.95);
+            }
+            .city-dots {
+              position: absolute; top: 28%; left: 0; right: 0; height: 32%;
+              background-image: radial-gradient(#ffd166 1.5px, transparent 1.5px);
+              background-size: 12px 12px;
+            }
 
-            .switch { position: relative; width: 42px; height: 22px; flex-shrink: 0; }
-            .switch input { opacity: 0; width: 0; height: 0; }
-            .slider { position: absolute; inset: 0; background: #2E323B; border-radius: 22px; transition: 0.15s; }
-            .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background: #B0B5BD; border-radius: 50%; transition: 0.15s; }
-            input:checked + .slider { background: var(--active); }
-            input:checked + .slider:before { transform: translateX(20px); background: #fff; }
+            .badge-lbl { position: absolute; top: 10px; background: rgba(13, 17, 23, 0.78); color: #d0d7de; font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 4px 9px; border-radius: 6px; z-index: 5; }
+            .badge-lbl.left { left: 10px; }
+            .badge-lbl.right { right: 10px; }
+            .split-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #fff; z-index: 6; }
+            .split-handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 34px; height: 34px; border-radius: 50%; background: #fff; color: #000; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,0.6); z-index: 7; }
+            .split-range { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; z-index: 10; cursor: ew-resize; }
 
-            .sub-control { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-            .step-box { display: flex; align-items: center; gap: 12px; }
-            .step-btn { background: #262930; color: #fff; border: 1px solid var(--border); width: 30px; height: 28px; border-radius: 4px; font-weight: 700; }
-            .select-box { width: 100%; background: #141619; color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; font-size: 12px; outline: none; }
+            /* TARGET GAME BAR */
+            .game-bar { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 11px 14px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+            .game-title { font-size: 14px; font-weight: 800; }
+            .game-sub { font-size: 11px; color: var(--muted); }
 
-            .dev-panel { background: var(--surface); border: 1px solid var(--accent); border-radius: 6px; padding: 12px; margin-bottom: 14px; }
-            .dev-header { font-size: 13px; font-weight: 700; color: #EF5350; margin-bottom: 10px; display: flex; justify-content: space-between; }
-            .key-row { background: #141619; border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; margin-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
-            .tag-btn { background: #262930; color: #fff; border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 10px; margin-left: 4px; }
-            .tag-btn.danger { background: #B71C1C; border-color: #D32F2F; }
+            /* PRESET CEPAT BUTTONS */
+            .sec-label { font-size: 11px; color: var(--muted); letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 8px; font-weight: 700; }
+            .preset-bar { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 4px; gap: 4px; margin-bottom: 16px; }
+            .preset-btn { background: transparent; color: var(--text); border: none; padding: 9px 4px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+            .preset-btn.active { background: var(--cyan); color: #051622; box-shadow: 0 0 12px var(--cyan-glow); }
 
-            .status-box { background: #141619; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
-            .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 54px; background: var(--surface); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; z-index: 90; }
-            .nav-btn { font-size: 12px; color: var(--muted); font-weight: 500; padding: 8px 12px; }
-            .nav-btn.active { color: var(--text); font-weight: 700; border-bottom: 2px solid var(--accent); }
+            /* SLIDER DETAIL TEKSTUR & RESOLUSI */
+            .slider-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+            .slider-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 14px; font-weight: 700; }
+            .slider-val-txt { color: var(--cyan); font-weight: 800; }
+            .range-styled { -webkit-appearance: none; width: 100%; height: 6px; border-radius: 4px; background: #263040; outline: none; margin-bottom: 12px; }
+            .range-styled::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid var(--cyan); box-shadow: 0 0 10px var(--cyan); cursor: pointer; }
+            .ticks-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-weight: 600; }
+            .ticks-row span.active { color: var(--cyan); font-weight: 800; }
+
+            /* 2 KOTAK TOGGLE (PIKSEL TAJAM & BATAS JARAK TEGAS) */
+            .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+            .opt-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; justify-content: space-between; }
+            .opt-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+            .opt-title { font-size: 13px; font-weight: 800; }
+            .opt-desc { font-size: 11px; color: var(--muted); line-height: 1.35; }
+
+            /* CYAN SWITCH */
+            .sw { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+            .sw input { opacity: 0; width: 0; height: 0; }
+            .sl { position: absolute; inset: 0; background: #293241; border-radius: 24px; transition: .2s; }
+            .sl:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #0D1117; border-radius: 50%; transition: .2s; }
+            input:checked + .sl { background: var(--cyan); box-shadow: 0 0 10px var(--cyan-glow); }
+            input:checked + .sl:before { transform: translateX(20px); background: #061824; }
+
+            /* CATATAN INFO */
+            .notes-box { font-size: 11px; color: var(--muted); line-height: 1.6; margin-bottom: 14px; padding: 0 4px; }
+
+            /* TOMBOL BAWAH (RESET KE ASLI & SIMPAN) */
+            .action-row { display: flex; gap: 10px; margin-bottom: 14px; }
+            .btn-reset { flex: 1; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 13px; font-size: 13px; font-weight: 800; cursor: pointer; }
+            .btn-save { flex: 1.8; background: var(--cyan); color: #051622; border: none; border-radius: 14px; padding: 13px; font-size: 14px; font-weight: 900; box-shadow: 0 0 20px var(--cyan-glow); cursor: pointer; }
+
+            /* AIM & ADMIN CARDS */
+            .aim-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 13px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+            .key-item { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+            .sm-btn { background: var(--card-2); color: #fff; border: 1px solid var(--border); padding: 5px 8px; border-radius: 6px; font-size: 10px; margin-left: 4px; }
+            .sm-btn.stop { background: #5a1818; border-color: var(--danger); }
+
+            /* BOTTOM NAV */
+            .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 56px; background: var(--card); border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center; z-index: 90; }
+            .nav-it { font-size: 12px; color: var(--muted); font-weight: 700; padding: 8px 12px; cursor: pointer; }
+            .nav-it.active { color: var(--cyan); border-bottom: 2px solid var(--cyan); }
           </style>
           </head>
           <body>
 
+            <!-- GERBANG AWAL SHIZUKU & LISENSI 1 KEY 1 DEVICE -->
             <div class="login-wrap" id="login-screen">
-              <div class="login-card">
-                <div class="app-name">DANZSTRAIGHT</div>
-                <div class="app-ver">Pure Free Fire Package Injector v8.0</div>
+              <div class="login-box">
+                <div class="brand-title">DANZSTRAIGHT</div>
+                <div class="brand-sub">Graphic Studio & Shizuku System v9.0</div>
 
-                <div class="section-box">
-                  <div class="row-between">
-                    <span>Akses Shizuku ADB</span>
-                    <span class="status-pill" id="shz-pill">Belum Aktif</span>
+                <div class="box-inner">
+                  <div class="row-sb">
+                    <span>Status Shizuku ADB</span>
+                    <span class="pill" id="shz-pill">Belum Terhubung</span>
                   </div>
-                  <button class="btn btn-secondary" onclick="AndroidBridge.connectShizuku()">Hubungkan Shizuku</button>
+                  <button class="btn-dark" onclick="AndroidBridge.connectShizuku()">Hubungkan Shizuku</button>
                 </div>
 
-                <div class="section-box">
-                  <div class="row-between" style="margin:0">
+                <div class="box-inner">
+                  <div class="row-sb" style="margin:0">
                     <span>ID Perangkat: <b id="hwid-label">...</b></span>
-                    <button class="tag-btn" onclick="AndroidBridge.copyText(myHwid)">Salin</button>
+                    <button class="sm-btn" onclick="AndroidBridge.copyText(myHwid)">Salin</button>
                   </div>
                 </div>
 
-                <input type="text" class="input-field" id="key-input" placeholder="Masukkan Kode Lisensi (1 Key 1 HP)">
-                <button class="btn" onclick="verifyKey()">Masuk Aplikasi</button>
+                <input type="text" class="inp" id="key-input" placeholder="Masukkan License Key (1 Key 1 Device)">
+                <button class="btn-cyan" onclick="verifyKey()">Masuk Aplikasi</button>
               </div>
             </div>
 
-            <div class="top-bar">
-              <div>
-                <div class="app-name">DANZSTRAIGHT</div>
-                <div style="font-size:11px;color:var(--muted)">Target Murni: com.dts.freefireth / max (Tanpa Downscale)</div>
-              </div>
-              <button class="btn-small" onclick="AndroidBridge.resetAll()">Reset FF</button>
+            <!-- TOP TABS PERSIS FOTO 1 & 2 -->
+            <div class="top-tabs">
+              <div class="tab-pill active" id="tab-btn-tex" onclick="openSection('tex')">Tekstur</div>
+              <div class="tab-pill" id="tab-btn-light" onclick="openSection('light')">Mode Ringan</div>
+              <div class="tab-pill" id="tab-btn-aim" onclick="openSection('aim')">Aim & Sensi</div>
             </div>
 
-            <div class="info-grid">
-              <div class="info-item">
-                <div class="info-label">Target Injeksi</div>
-                <div class="info-val">Khusus Paket FF</div>
-              </div>
-              <div class="info-item">
-                <div class="info-label">Sistem HP & Resolusi</div>
-                <div class="info-val">100% Tidak Diubah</div>
-              </div>
-            </div>
-
-            <div class="dev-panel hidden" id="dev-panel">
-              <div class="dev-header">
-                <span>Manajemen Lisensi Developer</span>
-                <span>1 Key = 1 HP</span>
-              </div>
-              <div style="display:flex;gap:6px;margin-bottom:8px">
-                <input type="text" class="input-field" id="custom-key" placeholder="Nama Key (Kosong = Otomatis)" style="margin:0">
-                <button class="btn" style="width:auto;padding:0 14px" onclick="createNewKey()">Buat Key</button>
-              </div>
-              <input type="text" class="input-field" id="target-hwid" placeholder="Opsional: Kunci langsung ke ID Perangkat" style="margin:0">
-              <div id="key-list"></div>
-            </div>
-
-            <div class="module-list">
-              <div class="module-card" id="card-1">
-                <div class="module-top">
-                  <div>
-                    <div class="module-title">Aim Merah (Drag HS)</div>
-                    <div class="module-desc">Kompilasi native speed biner Free Fire & kunci prioritas thread input FF</div>
-                  </div>
-                  <label class="switch"><input type="checkbox" id="sw-1" onchange="toggleMod(1,'Aim Merah FF')"><span class="slider"></span></label>
+            <!-- ==================== BAGIAN 1: TEKSTUR (PERSIS FOTO 1) ==================== -->
+            <div id="sec-tex">
+              <div class="preview-card" id="tex-preview-card">
+                <div class="prev-layer tex-before">
+                  <div class="tex-ground-before"></div>
                 </div>
-              </div>
-
-              <div class="module-card" id="card-2">
-                <div class="module-top">
-                  <div>
-                    <div class="module-title">Easy Drag</div>
-                    <div class="module-desc">I/O Real-Time & ikat semua core CPU khusus pada proses Free Fire</div>
-                  </div>
-                  <label class="switch"><input type="checkbox" id="sw-2" onchange="toggleMod(2,'Easy Drag FF')"><span class="slider"></span></label>
+                <div class="prev-layer tex-after" id="tex-after-layer">
+                  <div class="tex-ground-after" id="tex-ground-after"></div>
                 </div>
+                <div class="badge-lbl left">SEBELUM</div>
+                <div class="badge-lbl right">SESUDAH</div>
+                <div class="split-line" id="tex-line"></div>
+                <div class="split-handle" id="tex-handle">&leftrightarrow;</div>
+                <input type="range" min="5" max="95" value="50" class="split-range" oninput="moveSplit('tex', this.value)">
               </div>
 
-              <div class="module-card" id="card-3">
-                <div class="module-top">
-                  <div>
-                    <div class="module-title">Smooth Aim</div>
-                    <div class="module-desc">Aktifkan Game Driver perangkat keras & kunci 120 FPS khusus paket FF</div>
-                  </div>
-                  <label class="switch"><input type="checkbox" id="sw-3" onchange="toggleMod(3,'Smooth Aim FF')"><span class="slider"></span></label>
+              <div class="game-bar">
+                <div>
+                  <div class="game-title">Free Fire</div>
+                  <div class="game-sub">Aktifkan untuk Free Fire</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="sw-ff-tex" checked><span class="sl"></span></label>
+              </div>
+
+              <div class="sec-label">PRESET CEPAT</div>
+              <div class="preset-bar">
+                <button class="preset-btn" id="pr-halus" onclick="selectPreset('halus')">Halus</button>
+                <button class="preset-btn" id="pr-retro" onclick="selectPreset('retro')">Retro</button>
+                <button class="preset-btn" id="pr-kotak" onclick="selectPreset('kotak')">Kotak Total</button>
+                <button class="preset-btn active" id="pr-kustom" onclick="selectPreset('kustom')">Kustom</button>
+              </div>
+
+              <div class="slider-card">
+                <div class="slider-head">
+                  <span>Detail Tekstur</span>
+                  <span class="slider-val-txt" id="tex-lvl-name">Kotak</span>
+                </div>
+                <input type="range" min="1" max="5" step="1" value="4" class="range-styled" id="tex-slider" oninput="onTexSliderChange(this.value)">
+                <div class="ticks-row">
+                  <span id="tk-1">Asli</span>
+                  <span id="tk-2">Ringan</span>
+                  <span id="tk-3">Retro</span>
+                  <span id="tk-4" class="active">Kotak</span>
+                  <span id="tk-5">Ekstrem</span>
                 </div>
               </div>
 
-              <div class="module-card" id="card-4">
-                <div class="module-top">
-                  <div>
-                    <div class="module-title">Aim Legit</div>
-                    <div class="module-desc">Bebaskan paket Free Fire dari pembatasan daya & throttling proses</div>
+              <div class="two-col">
+                <div class="opt-card">
+                  <div class="opt-top">
+                    <span class="opt-title">Piksel Tajam</span>
+                    <label class="sw"><input type="checkbox" id="sw-sharp" checked onchange="updateTexVisual()"><span class="sl"></span></label>
                   </div>
-                  <label class="switch"><input type="checkbox" id="sw-4" onchange="toggleMod(4,'Aim Legit FF')"><span class="slider"></span></label>
+                  <div class="opt-desc">Tepi tekstur kotak-kotak. Matikan untuk efek buram halus.</div>
+                </div>
+
+                <div class="opt-card">
+                  <div class="opt-top">
+                    <span class="opt-title">Batas Jarak Tegas</span>
+                    <label class="sw"><input type="checkbox" id="sw-lod" checked onchange="updateTexVisual()"><span class="sl"></span></label>
+                  </div>
+                  <div class="opt-desc">Perpindahan detail dekat-jauh jadi patah-patah.</div>
                 </div>
               </div>
 
-              <div class="module-card" id="card-5">
-                <div class="module-top">
-                  <div>
-                    <div class="module-title">Sensitivitas Proses FF</div>
-                    <div class="module-desc">Atur tingkat prioritas respons thread internal Free Fire (Level 1 - 7)</div>
-                  </div>
-                  <label class="switch"><input type="checkbox" id="sw-5" onchange="toggleMod(5,'Sensitivitas FF')"><span class="slider"></span></label>
-                </div>
-                <div class="sub-control">
-                  <span style="font-size:12px;color:var(--muted)">Level Prioritas Thread FF:</span>
-                  <div class="step-box">
-                    <button class="step-btn" onclick="changeSensi(-1)">-</button>
-                    <b id="sensi-val" style="font-size:13px">4</b>
-                    <button class="step-btn" onclick="changeSensi(1)">+</button>
-                  </div>
-                </div>
+              <div class="notes-box">
+                <div>&#9432; Diubah waktu lagi main? Tutup game lalu buka lagi.</div>
+                <div>&#9728; Paling kelihatan kalau grafis game di setelan paling rendah (Smooth).</div>
               </div>
 
-              <div class="module-card" id="card-6">
-                <div class="module-top">
-                  <div>
-                    <div class="module-title">Boost Sistem FF</div>
-                    <div class="module-desc">Kunci standby-bucket Free Fire ke Active & bersihkan cache internal FF</div>
-                  </div>
-                  <label class="switch"><input type="checkbox" id="sw-6" onchange="toggleMod(6,'Boost Sistem FF')"><span class="slider"></span></label>
-                </div>
-              </div>
-
-              <div class="module-card" id="card-7">
-                <div class="module-top">
-                  <div>
-                    <div class="module-title">Grafik Ringan (Tanpa Downscale)</div>
-                    <div class="module-desc">Optimasi driver grafis khusus paket Free Fire tanpa menurunkan resolusi</div>
-                  </div>
-                  <label class="switch"><input type="checkbox" id="sw-7" onchange="toggleMod(7,'Grafik Ringan FF')"><span class="slider"></span></label>
-                </div>
-                <div class="sub-control">
-                  <select class="select-box" id="light-mode" onchange="document.getElementById('sw-7').checked=true;toggleMod(7,'Grafik Ringan FF')">
-                    <option value="1">Mode 1: Super Ringan (Production Driver + Loading Boost FF)</option>
-                    <option value="2">Mode 2: Mode PC (ANGLE OpenGL Driver Khusus Paket FF)</option>
-                  </select>
-                </div>
+              <div class="action-row">
+                <button class="btn-reset" onclick="resetGraphicStudio()">Reset ke Asli</button>
+                <button class="btn-save" onclick="saveGraphicStudio()">Simpan</button>
               </div>
             </div>
 
-            <div class="status-box" id="status-log">Status: Menunggu perintah...</div>
-            <button class="btn" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire Sekarang</button>
+            <!-- ==================== BAGIAN 2: MODE RINGAN (PERSIS FOTO 2) ==================== -->
+            <div id="sec-light" class="hidden">
+              <div class="preview-card">
+                <div class="prev-layer res-before">
+                  <div class="city-dots"></div>
+                </div>
+                <div class="prev-layer res-after" id="res-after-layer">
+                  <div class="city-dots"></div>
+                </div>
+                <div class="badge-lbl left">SEBELUM</div>
+                <div class="badge-lbl right">SESUDAH</div>
+                <div class="split-line" id="res-line"></div>
+                <div class="split-handle" id="res-handle">&leftrightarrow;</div>
+                <input type="range" min="5" max="95" value="50" class="split-range" oninput="moveSplit('res', this.value)">
+              </div>
 
-            <div class="bottom-bar">
-              <div class="nav-btn active" onclick="window.scrollTo(0,0)">Menu Utama</div>
-              <div class="nav-btn hidden" id="nav-dev" onclick="document.getElementById('dev-panel').classList.toggle('hidden')">Panel Key</div>
-              <div class="nav-btn" onclick="AndroidBridge.resetAll()">Reset FF</div>
-              <div class="nav-btn" onclick="AndroidBridge.launchFreeFire()">Buka Game</div>
+              <div class="game-bar">
+                <div>
+                  <div class="game-title">Free Fire</div>
+                  <div class="game-sub">Aktifkan Mode Ringan</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="sw-ff-light" checked><span class="sl"></span></label>
+              </div>
+
+              <div class="slider-card">
+                <div class="slider-head">
+                  <span>Resolusi game</span>
+                  <span class="slider-val-txt" id="res-val-txt">70%</span>
+                </div>
+                <input type="range" min="50" max="90" step="5" value="70" class="range-styled" id="res-slider" oninput="onResSliderChange(this.value)">
+                <div class="ticks-row">
+                  <span>50%</span>
+                  <span class="active">DISARANKAN (70%)</span>
+                  <span>90%</span>
+                </div>
+              </div>
+
+              <div class="notes-box">
+                <div>&#9432; Game jadi lebih ringan. Gambar & tulisan sedikit kurang tajam.</div>
+                <div>&#8634; Ubah saat sedang main? Mulai ulang game (Otomatis saat klik Simpan).</div>
+              </div>
+
+              <div class="action-row">
+                <button class="btn-reset" onclick="resetGraphicStudio()">Reset ke Bawaan</button>
+                <button class="btn-save" onclick="saveGraphicStudio()">Simpan</button>
+              </div>
+            </div>
+
+            <!-- ==================== BAGIAN 3: AIM MERAH, EASY DRAG & ADMIN KEY ==================== -->
+            <div id="sec-aim" class="hidden">
+              <div class="aim-card">
+                <div>
+                  <div class="game-title">Aim Merah (Drag HS)</div>
+                  <div class="game-sub">Kompilasi cepat paket FF & prioritas thread input tertinggi</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="sw-aim-1" onchange="trigAim(1,'Aim Merah')"><span class="sl"></span></label>
+              </div>
+
+              <div class="aim-card">
+                <div>
+                  <div class="game-title">Easy Drag</div>
+                  <div class="game-sub">Real-Time I/O & ikat semua core CPU pada proses Free Fire</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="sw-aim-2" onchange="trigAim(2,'Easy Drag')"><span class="sl"></span></label>
+              </div>
+
+              <div class="aim-card">
+                <div>
+                  <div class="game-title">Smooth Aim</div>
+                  <div class="game-sub">Aktifkan Hardware Game Driver khusus paket Free Fire</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="sw-aim-3" onchange="trigAim(3,'Smooth Aim')"><span class="sl"></span></label>
+              </div>
+
+              <div class="aim-card">
+                <div>
+                  <div class="game-title">Aim Legit</div>
+                  <div class="game-sub">Hapus pembatasan daya & stabilkan pembacaan bidikan FF</div>
+                </div>
+                <label class="sw"><input type="checkbox" id="sw-aim-4" onchange="trigAim(4,'Aim Legit')"><span class="sl"></span></label>
+              </div>
+
+              <div class="slider-card">
+                <div class="slider-head">
+                  <span>Sensitivitas Proses FF (1 - 7)</span>
+                  <span class="slider-val-txt" id="sensi-txt">Level 4</span>
+                </div>
+                <input type="range" min="1" max="7" step="1" value="4" class="range-styled" id="sensi-slider" onchange="onSensiChange(this.value)">
+              </div>
+
+              <!-- PANEL DEVELOPER KEY (MUNCUL SAAT LOGIN PAKAI DANZ-DEV-999) -->
+              <div class="slider-card hidden" id="dev-panel">
+                <div class="slider-head">
+                  <span style="color:var(--cyan)">Developer Key Manager</span>
+                  <span style="font-size:11px;color:var(--muted)">1 Key = 1 HP</span>
+                </div>
+                <div style="display:flex;gap:6px;margin-bottom:8px">
+                  <input type="text" class="inp" id="custom-key" placeholder="Nama Key (Kosong = Acak)" style="margin:0">
+                  <button class="btn-cyan" style="width:auto;padding:0 14px" onclick="createNewKey()">Buat</button>
+                </div>
+                <input type="text" class="inp" id="target-hwid" placeholder="Opsional: Kunci ke ID Perangkat" style="margin:0">
+                <div id="key-list"></div>
+              </div>
+            </div>
+
+            <button class="btn-cyan" style="margin-top:4px" onclick="AndroidBridge.launchFreeFire()">Buka Free Fire Sekarang</button>
+
+            <div class="bottom-nav">
+              <div class="nav-it active" id="nav-1" onclick="openSection('tex')">Tekstur MC</div>
+              <div class="nav-it" id="nav-2" onclick="openSection('light')">Mode Ringan</div>
+              <div class="nav-it" id="nav-3" onclick="openSection('aim')">Aim & Key</div>
+              <div class="nav-it" onclick="AndroidBridge.launchFreeFire()">Main FF</div>
             </div>
 
             <script>
               const DEV_KEY = "DANZ-DEV-999";
+              const LVL_NAMES = ["", "Asli", "Ringan", "Retro", "Kotak", "Ekstrem"];
               let myHwid = window.AndroidBridge ? AndroidBridge.getHwid() : "HWID-01";
               let shizukuOk = false;
-              let sensi = 4;
 
               document.getElementById('hwid-label').innerText = myHwid;
 
               function setShizukuStatus(ok) {
                 shizukuOk = ok;
                 const p = document.getElementById('shz-pill');
-                if (ok) {
-                  p.innerText = "Terhubung";
-                  p.classList.add('ok');
-                }
+                if (ok) { p.innerText = "Terhubung"; p.classList.add('ok'); }
               }
 
-              function getKeys() {
-                const raw = localStorage.getItem('danz_v8_keys');
-                if (!raw) {
-                  const def = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
-                  localStorage.setItem('danz_v8_keys', JSON.stringify(def));
-                  return def;
+              function openSection(sec) {
+                document.getElementById('sec-tex').classList.toggle('hidden', sec !== 'tex');
+                document.getElementById('sec-light').classList.toggle('hidden', sec !== 'light');
+                document.getElementById('sec-aim').classList.toggle('hidden', sec !== 'aim');
+
+                document.getElementById('tab-btn-tex').classList.toggle('active', sec === 'tex');
+                document.getElementById('tab-btn-light').classList.toggle('active', sec === 'light');
+                document.getElementById('tab-btn-aim').classList.toggle('active', sec === 'aim');
+
+                document.getElementById('nav-1').classList.toggle('active', sec === 'tex');
+                document.getElementById('nav-2').classList.toggle('active', sec === 'light');
+                document.getElementById('nav-3').classList.toggle('active', sec === 'aim');
+              }
+
+              // Geser Garis Pembanding SEBELUM / SESUDAH
+              function moveSplit(type, val) {
+                const layer = document.getElementById(type === 'tex' ? 'tex-after-layer' : 'res-after-layer');
+                const line = document.getElementById(type === 'tex' ? 'tex-line' : 'res-line');
+                const handle = document.getElementById(type === 'tex' ? 'tex-handle' : 'res-handle');
+                layer.style.clipPath = `polygon(${val}% 0, 100% 0, 100% 100%, ${val}% 100%)`;
+                line.style.left = val + '%';
+                handle.style.left = val + '%';
+              }
+
+              // Pilih Preset Cepat (Halus, Retro, Kotak Total, Kustom)
+              function selectPreset(p) {
+                ['halus','retro','kotak','kustom'].forEach(x => {
+                  document.getElementById('pr-' + x).classList.toggle('active', x === p);
+                });
+                const sl = document.getElementById('tex-slider');
+                const sharp = document.getElementById('sw-sharp');
+                const lod = document.getElementById('sw-lod');
+                if (p === 'halus') { sl.value = 2; sharp.checked = false; lod.checked = false; }
+                else if (p === 'retro') { sl.value = 3; sharp.checked = true; lod.checked = false; }
+                else if (p === 'kotak') { sl.value = 5; sharp.checked = true; lod.checked = true; }
+                onTexSliderChange(sl.value, false);
+              }
+
+              function onTexSliderChange(val, switchToCustom = true) {
+                if (switchToCustom) {
+                  ['halus','retro','kotak','kustom'].forEach(x => {
+                    document.getElementById('pr-' + x).classList.toggle('active', x === 'kustom');
+                  });
                 }
-                return JSON.parse(raw);
+                document.getElementById('tex-lvl-name').innerText = LVL_NAMES[val];
+                for (let i = 1; i <= 5; i++) {
+                  document.getElementById('tk-' + i).classList.toggle('active', i == val);
+                }
+                updateTexVisual();
+              }
+
+              function updateTexVisual() {
+                const lvl = parseInt(document.getElementById('tex-slider').value);
+                const sharp = document.getElementById('sw-sharp').checked;
+                const afterLayer = document.getElementById('tex-after-layer');
+                const groundAfter = document.getElementById('tex-ground-after');
+                const pxSize = 14 + (lvl * 12);
+                afterLayer.style.backgroundSize = pxSize + 'px ' + pxSize + 'px';
+                groundAfter.style.backgroundSize = pxSize + 'px ' + pxSize + 'px';
+                afterLayer.style.filter = sharp ? 'none' : 'blur(2px)';
+              }
+
+              function onResSliderChange(val) {
+                document.getElementById('res-val-txt').innerText = val + '%';
+                const blurPx = ((100 - val) / 18).toFixed(1);
+                document.getElementById('res-after-layer').style.filter = `blur(${blurPx}px)`;
+              }
+
+              function saveGraphicStudio() {
+                const enableTex = document.getElementById('sw-ff-tex').checked;
+                const texLvl = parseInt(document.getElementById('tex-slider').value);
+                const sharp = document.getElementById('sw-sharp').checked;
+                const lod = document.getElementById('sw-lod').checked;
+                const enableLight = document.getElementById('sw-ff-light').checked;
+                const resPct = parseInt(document.getElementById('res-slider').value);
+                AndroidBridge.applyGraphicStudio(enableTex, texLvl, sharp, lod, enableLight, resPct);
+              }
+
+              function resetGraphicStudio() {
+                document.getElementById('tex-slider').value = 1;
+                document.getElementById('res-slider').value = 90;
+                onTexSliderChange(1, false);
+                onResSliderChange(90);
+                AndroidBridge.applyGraphicStudio(false, 1, false, false, false, 100);
+              }
+
+              function trigAim(id, name) {
+                const on = document.getElementById('sw-aim-' + id).checked;
+                const s = parseInt(document.getElementById('sensi-slider').value);
+                AndroidBridge.runAimModule(id, name, on, s);
+              }
+
+              function onSensiChange(val) {
+                document.getElementById('sensi-txt').innerText = 'Level ' + val;
+                AndroidBridge.runAimModule(5, 'Sensitivitas FF Lv.' + val, true, parseInt(val));
+              }
+
+              // SISTEM LISENSI 1 KEY 1 DEVICE
+              function getKeys() {
+                const r = localStorage.getItem('danz_v9_keys');
+                if (!r) {
+                  const d = [{ key: "DANZ-VIP-001", hwid: "", status: "AKTIF" }];
+                  localStorage.setItem('danz_v9_keys', JSON.stringify(d));
+                  return d;
+                }
+                return JSON.parse(r);
               }
 
               function saveKeys(list) {
-                localStorage.setItem('danz_v8_keys', JSON.stringify(list));
+                localStorage.setItem('danz_v9_keys', JSON.stringify(list));
                 renderKeyList();
               }
 
               function verifyKey() {
                 if (!shizukuOk) {
-                  AndroidBridge.toast("Hubungkan dan izinkan Shizuku terlebih dahulu");
+                  AndroidBridge.toast("Hubungkan & izinkan Shizuku terlebih dahulu");
                   AndroidBridge.connectShizuku();
                   return;
                 }
@@ -682,7 +929,6 @@ jobs:
 
                 if (k === DEV_KEY) {
                   document.getElementById('login-screen').classList.add('hidden');
-                  document.getElementById('nav-dev').classList.remove('hidden');
                   document.getElementById('dev-panel').classList.remove('hidden');
                   renderKeyList();
                   return;
@@ -694,10 +940,10 @@ jobs:
                   item = { key: k, hwid: myHwid, status: "AKTIF" };
                   list.push(item);
                 }
-                if (!item) { AndroidBridge.toast("Kode lisensi tidak terdaftar"); return; }
-                if (item.status !== "AKTIF") { AndroidBridge.toast("Lisensi ini telah dinonaktifkan oleh Developer"); return; }
+                if (!item) { AndroidBridge.toast("Key tidak terdaftar"); return; }
+                if (item.status !== "AKTIF") { AndroidBridge.toast("Key telah diberhentikan oleh Developer"); return; }
                 if (item.hwid && item.hwid !== "" && item.hwid !== myHwid) {
-                  AndroidBridge.toast("Lisensi sudah terikat di perangkat lain (1 Key 1 HP)");
+                  AndroidBridge.toast("Key sudah terikat di perangkat lain (1 Key 1 HP)");
                   return;
                 }
                 item.hwid = myHwid;
@@ -720,58 +966,19 @@ jobs:
               function toggleKeyStatus(k) {
                 let list = getKeys();
                 let it = list.find(x => x.key === k);
-                if (it) {
-                  it.status = (it.status === "AKTIF") ? "BERHENTI" : "AKTIF";
-                  saveKeys(list);
-                }
-              }
-
-              function resetHwid(k) {
-                let list = getKeys();
-                let it = list.find(x => x.key === k);
-                if (it) {
-                  it.hwid = "";
-                  saveKeys(list);
-                  AndroidBridge.toast("ID Perangkat direset untuk " + k);
-                }
+                if (it) { it.status = (it.status === "AKTIF") ? "STOP" : "AKTIF"; saveKeys(list); }
               }
 
               function renderKeyList() {
                 document.getElementById('key-list').innerHTML = getKeys().map(x => `
-                  <div class="key-row">
+                  <div class="key-item">
+                    <div><b>${x.key}</b><div style="color:var(--muted)">HP: ${x.hwid || 'Free'} | ${x.status}</div></div>
                     <div>
-                      <b>${x.key}</b>
-                      <div style="color:var(--muted)">HP: ${x.hwid || 'Belum Terikat'} | Status: ${x.status}</div>
-                    </div>
-                    <div>
-                      <button class="tag-btn" onclick="AndroidBridge.copyText('${x.key}')">Salin</button>
-                      <button class="tag-btn" onclick="resetHwid('${x.key}')">Reset HP</button>
-                      <button class="tag-btn danger" onclick="toggleKeyStatus('${x.key}')">${x.status === 'AKTIF' ? 'Stop Key' : 'Aktifkan'}</button>
+                      <button class="sm-btn" onclick="AndroidBridge.copyText('${x.key}')">Salin</button>
+                      <button class="sm-btn stop" onclick="toggleKeyStatus('${x.key}')">${x.status === 'AKTIF' ? 'Stop Key' : 'Aktifkan'}</button>
                     </div>
                   </div>
                 `).join('');
-              }
-
-              function changeSensi(d) {
-                sensi = Math.min(7, Math.max(1, sensi + d));
-                document.getElementById('sensi-val').innerText = sensi;
-                document.getElementById('sw-5').checked = true;
-                toggleMod(5, 'Sensitivitas FF Lv.' + sensi);
-              }
-
-              function toggleMod(id, name) {
-                const sw = document.getElementById('sw-' + id);
-                const card = document.getElementById('card-' + id);
-                const mode = parseInt(document.getElementById('light-mode').value || "1");
-                if (sw.checked) {
-                  card.classList.add('active');
-                  const res = AndroidBridge.runFeature(id, name, true, sensi, mode);
-                  document.getElementById('status-log').innerText = "Status: " + res;
-                } else {
-                  card.classList.remove('active');
-                  const res = AndroidBridge.runFeature(id, name, false, sensi, 0);
-                  document.getElementById('status-log').innerText = "Status: " + res;
-                }
               }
             </script>
           </body>
@@ -781,8 +988,8 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > clean_apk/local.properties
           cd clean_apk && gradle assembleDebug --no-daemon
 
-      - name: Upload DANZSTRAIGHT V8 APK
+      - name: Upload DANZSTRAIGHT V9 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DANZSTRAIGHT-V8-PURE-FF
+          name: DANZSTRAIGHT-V9-GRAPHIC-STUDIO
           path: clean_apk/app/build/outputs/apk/debug/*.apk
